@@ -1,20 +1,10 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import type { PropsWithChildren } from 'react';
+import { View } from 'react-native';
+import AppErrorBoundary from './src/components/ui/AppErrorBoundary';
+import { theme } from './src/core/theme';
+import { AuthProvider } from './src/providers/AuthProvider';
 
-export default function App() {
-  return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
-  );
+// Expo Router chọn màn hình theo URL. App giữ các provider dùng chung.
+export default function App({ children }: PropsWithChildren) {
+  return <View style={{ flex: 1, backgroundColor: theme.colors.background }}><AppErrorBoundary><AuthProvider>{children}</AuthProvider></AppErrorBoundary></View>;
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
