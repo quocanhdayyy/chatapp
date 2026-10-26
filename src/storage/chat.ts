@@ -1,11 +1,12 @@
 import { ApiError } from '../core/network/ApiError';
 import type { Message } from '../types/chat';
 
-const STORAGE_KEY = 'chatapp-chat-messages';
+export const CHAT_MESSAGES_STORAGE_KEY = 'chatapp-chat-messages';
+const listeners = new Set<() => void>();
 
 export function loadChatMessages(): Message[] | null {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = localStorage.getItem(CHAT_MESSAGES_STORAGE_KEY);
 
     if (saved === null) return null;
 
@@ -44,7 +45,7 @@ export function loadChatMessages(): Message[] | null {
 export function saveChatMessages(messages: Message[]): void {
   try {
     localStorage.setItem(
-      STORAGE_KEY,
+      CHAT_MESSAGES_STORAGE_KEY,
       JSON.stringify(messages),
     );
   } catch {
@@ -54,4 +55,13 @@ export function saveChatMessages(messages: Message[]): void {
       'STORAGE_WRITE',
     );
   }
+
+  listeners.forEach((listener) => {
+    try { listener(); } catch { /* Không biến một lần lưu thành công thành lỗi giao diện. */ }
+  });
+}
+
+export function subscribeChatMessages(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
 }

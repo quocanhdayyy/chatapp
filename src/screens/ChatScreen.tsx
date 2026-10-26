@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ComponentRef } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useRef, useState, type ComponentRef } from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -11,6 +12,7 @@ import { getConversations, getMessages, sendMessage } from '../api/chat';
 import { getFriends, type FriendEntry } from '../api/friends';
 import ConversationRow from '../components/ConversationRow';
 import ChatComposer from '../components/ChatComposer';
+import AppButton from '../components/ui/AppButton';
 import UserAvatar from '../components/ui/UserAvatar';
 import {
   EmptyState,
@@ -18,6 +20,8 @@ import {
   LoadingState,
 } from '../components/ui/StateViews';
 import { theme } from '../core/theme';
+import { chatTransport } from '../core/chatTransport';
+import { simulateIncomingMessage } from '../dev/chatActivity';
 import type { User } from '../types/auth';
 import type { Conversation, Message } from '../types/chat';
 import { mergeChatMessages } from '../utils/chatMessages';
@@ -34,6 +38,10 @@ export default function ChatScreen({ user }: Props) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [sendErrors, setSendErrors] = useState<Record<string, string>>({});
   const [sendingId, setSendingId] = useState<string | null>(null);
+  const [receiveError, setReceiveError] = useState('');
+  const [receiveReload, setReceiveReload] = useState(0);
+  const [demoError, setDemoError] = useState('');
+  const [simulating, setSimulating] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [messagesLoading, setMessagesLoading] = useState(false);
@@ -46,12 +54,31 @@ export default function ChatScreen({ user }: Props) {
   const mounted = useRef(false);
   const selectedConversation = useRef<string | null>(null);
   const sendInFlight = useRef(false);
+  const simulationInFlight = useRef(false);
   const messageScroll = useRef<ComponentRef<typeof ScrollView>>(null);
 
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
+
+  // Tin nhận được đi qua adapter, không được thêm trực tiếp từ nút thử.
+  useFocusEffect(useCallback(() => {
+    // Quay lại route thì đọc bù lịch sử, vì lúc rời route đã hủy listener.
+    setMessagesReload((value) => value + 1);
+    return chatTransport.subscribe(user.id, (message) => {
+      if (!mounted.current) return;
+      setReceiveError('');
+      setThreads((current) => ({
+        ...current,
+        [message.conversationId]: mergeChatMessages(current[message.conversationId] ?? [], [message], message.conversationId),
+      }));
+    }, (err) => {
+      if (mounted.current) setReceiveError(err.message);
+    });
+    // receiveReload chủ động khởi động lại listener khi bấm Thử lại.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user.id, receiveReload]));
 
   // Khi mở màn hình: lấy các cuộc trò chuyện và danh bạ.
   useEffect(() => {
@@ -189,6 +216,24 @@ export default function ChatScreen({ user }: Props) {
     }
   }
 
+  async function handleSimulate() {
+    const conversationId = selectedId ?? conversations[0]?.id;
+    if (!conversationId || simulationInFlight.current) return;
+    simulationInFlight.current = true;
+    setSimulating(true);
+    setDemoError('');
+
+    try {
+      // Chỉ tạo dữ liệu; adapter nhận sự kiện rồi tự cập nhật giao diện.
+      await simulateIncomingMessage(conversationId);
+    } catch (err) {
+      if (mounted.current) setDemoError(err instanceof Error ? err.message : 'Không tạo được tin nhắn thử.');
+    } finally {
+      simulationInFlight.current = false;
+      if (mounted.current) setSimulating(false);
+    }
+  }
+
   function otherPerson(conversation: Conversation) {
     const id =
       conversation.participantIds.find((value) => value !== user.id) ?? '';
@@ -204,6 +249,8 @@ export default function ChatScreen({ user }: Props) {
   );
 
   const person = selected ? otherPerson(selected) : null;
+  const demoConversation = selected ?? conversations[0];
+  const demoPerson = demoConversation ? otherPerson(demoConversation) : null;
   const messages = selectedId ? threads[selectedId] ?? [] : [];
   const draft = selectedId ? drafts[selectedId] ?? '' : '';
   const sendError = selectedId ? sendErrors[selectedId] ?? '' : '';
@@ -257,9 +304,28 @@ export default function ChatScreen({ user }: Props) {
             })
           )}
         </ScrollView>
+
+        {__DEV__ && demoPerson && (
+          <View style={styles.demoTools}>
+            <AppButton
+              label={`${demoPerson.name} gửi tin thử`}
+              icon="comment"
+              variant="secondary"
+              loading={simulating}
+              onPress={() => { void handleSimulate(); }}
+            />
+            {!!demoError && <Text style={styles.demoError} accessibilityRole="alert">{demoError}</Text>}
+          </View>
+        )}
       </View>
 
       <View style={styles.main}>
+        {!!receiveError && (
+          <ErrorState message={receiveError} onRetry={() => {
+            setReceiveError('');
+            setReceiveReload((value) => value + 1);
+          }} />
+        )}
         {!person ? (
           <View style={styles.center}>
             <EmptyState message="Chọn một cuộc trò chuyện để xem tin nhắn." />
@@ -370,6 +436,8 @@ const styles = StyleSheet.create({
   list: {
     padding: 8,
   },
+  demoTools: { flexShrink: 0, padding: 12, gap: 8, borderTopWidth: 1, borderTopColor: theme.colors.border },
+  demoError: { fontSize: 12, lineHeight: 18, color: theme.colors.error },
   main: {
     flex: 1,
     minWidth: 0,

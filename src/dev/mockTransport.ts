@@ -5,7 +5,7 @@ import { handleFriendsRequest } from './friendsHandlers';
 import { changeUserPassword, loginUser } from './authHandlers';
 import { readUserProfile, writeUserProfile } from './profileHandlers';
 import { issueSession, revokeSession, validateAccessToken, validateRefreshToken } from './mockTokens';
-import { handleChatRequest } from './chatHandlers';
+import { handleChatDemoRequest, handleChatRequest } from './chatHandlers';
 let delayMs = 400;
 let online = true;
 let nextFailure: number | null = null;
@@ -55,12 +55,13 @@ async function handle(request: HttpRequest): Promise<unknown> {
   const authorization = request.headers?.Authorization;
   if (!authorization?.startsWith('Bearer ')) throw new ApiError('Vui lòng đăng nhập.', 401, 'UNAUTHENTICATED');
   const userId = validateAccessToken(authorization.slice(7));
-  if (
-  request.path === '/conversations' ||
-  request.path.startsWith('/conversations/')
-) {
-  return handleChatRequest(request, userId);
-}
+  if (request.path.startsWith('/dev/chat/')) {
+    return handleChatDemoRequest(request, userId);
+  }
+
+  if (request.path === '/conversations' || request.path.startsWith('/conversations/')) {
+    return handleChatRequest(request, userId);
+  }
 
   if (request.path === '/notifications' || request.path.startsWith('/notifications/')) {
     return handleNotificationsRequest(request, userId);
