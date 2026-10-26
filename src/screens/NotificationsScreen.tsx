@@ -1,3 +1,4 @@
+import { simulateFollowedPost } from '../dev/demoActivity';
 import { useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import type { User } from '../api/auth';
@@ -75,6 +76,21 @@ export default function NotificationsScreen({ user, onLogout, onFeed, onMyPosts,
     finally { busyRef.current = false; setBusy(null); }
   }
 
+  async function handleDemoPost() {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy('demo-post');
+    setActionError('');
+    setNotice('');
+    try {
+      const post = await simulateFollowedPost();
+      await refresh();
+      setNotice(`${post.author} vừa đăng bài mẫu. Bạn có thông báo mới.`);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Không tạo được bài mẫu.');
+    } finally { busyRef.current = false; setBusy(null); }
+  }
+
   const visible = unreadOnly ? notifications.filter((item) => item.readAt === null) : notifications;
 
   return (
@@ -108,6 +124,10 @@ export default function NotificationsScreen({ user, onLogout, onFeed, onMyPosts,
                 />
               ))}
             </View>
+            {__DEV__ && <View style={styles.demo}>
+              <Text style={styles.demoText}>Tạo một bài mẫu từ người bạn đang theo dõi.</Text>
+              <AppButton label="Thử thông báo bài mới" icon="plus" variant="secondary" onPress={() => { void handleDemoPost(); }} loading={busy === 'demo-post'} disabled={loading || !!busy} />
+            </View>}
           </View>
         </ScrollView>
       </View>
@@ -134,5 +154,7 @@ const styles = StyleSheet.create({
   refresh: { padding: 8, flexDirection: 'row', alignItems: 'center', gap: 6 },
   refreshText: { color: theme.colors.muted, fontSize: 11 },
   error: { color: theme.colors.error, paddingHorizontal: 20, paddingVertical: 16, fontSize: 13, lineHeight: 21 },
+  demo: { marginTop: 20, alignItems: 'flex-start', gap: 10 },
+  demoText: { color: theme.colors.muted, fontSize: 12, lineHeight: 20 },
   notice: { color: theme.colors.success, paddingHorizontal: 20, paddingVertical: 16, fontSize: 13, lineHeight: 21 },
 });

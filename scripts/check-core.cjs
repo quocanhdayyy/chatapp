@@ -452,7 +452,7 @@ async function main() {
   sharingFeed = feedUpdates.addPostToFeed(sharingFeed, sharedAgain);
   assert.equal(sharingFeed.find((item) => item.id === sharedOnce.id).shareCount, 2);
 
-  const rawSharing = JSON.parse(values.get('chatapp-posts'));
+  const rawSharing = JSON.parse(values.get('chatapp-posts')).posts;
   assert.equal(rawSharing.find((item) => item.id === sharedOnce.id).sharedPost, undefined);
   assert.equal(rawSharing.find((item) => item.id === sharedOnce.id).shareCount, undefined);
   const restoredSharing = load('src/storage/posts.ts').loadPosts();
@@ -573,6 +573,116 @@ async function main() {
   await posts.deletePost('2', reactionShare.id);
   await posts.deletePost('1', reactionSource.id);
   console.log('PASS: Thích/Tim, đổi loại không tăng tổng, chọn lại để bỏ, mỗi người một cảm xúc, lưu sau reload/sửa bài, bài chia sẻ độc lập, dữ liệu Like cũ và lỗi lưu.');
+
+  const noticeSocialSnapshot = values.get(friendKey);
+  const noticePostsSnapshot = values.get('chatapp-posts');
+  values.set(friendKey, JSON.stringify({ version: 3, relations: [], follows: [
+    { fromId: '1', toId: '2' }, { fromId: '3', toId: '2' }, { fromId: '1', toId: '3' },
+  ], notifications: [] }));
+  const oldNoticePost = { id: 'post-before-notifications', authorId: '2', author: 'Mai', content: 'Bài cũ', likes: 0, likedBy: [], images: [] };
+  values.set('chatapp-posts', JSON.stringify([oldNoticePost]));
+  let postNoticeApi = load('src/api/notifications.ts');
+  let postNoticeFriends = load('src/api/friends.ts');
+  const postNoticeStore = load('src/storage/posts.ts');
+  assert.equal((await postNoticeApi.getNotifications()).length, 0, 'Không gửi thông báo hồi tố cho bài cũ');
+  let publicationEvents = 0;
+  const stopPublicationEvents = postNoticeStore.subscribePostNotifications(() => { publicationEvents += 1; });
+  const authorMai = { id: '2', name: 'Mai', email: 'mai@example.com' };
+  const authorDung = { id: '3', name: 'Dũng', email: 'dung@example.com' };
+  const beforePublicationWrites = writes;
+  const socialBeforePublication = values.get(friendKey);
+  const followedPost = await posts.createPost(authorMai, 'Bài mới cho người đang theo dõi');
+  assert.equal(writes, beforePublicationWrites + 1, 'Bài và người nhận thông báo nằm trong một lần ghi');
+  assert.equal(values.get(friendKey), socialBeforePublication);
+  assert.equal(publicationEvents, 1, 'Có sự kiện cập nhật chuông trong cùng tab');
+  let followedNotices = await postNoticeApi.getNotifications();
+  assert.equal(followedNotices.length, 1);
+  const followedNotice = followedNotices[0];
+  assert.equal(followedNotice.type, 'followed_post');
+  assert.equal(followedNotice.actorName, 'Mai');
+  assert.equal(followedNotice.recipientId, '1');
+  assert.equal(followedNotice.sourceId, followedPost.id);
+  assert.equal(followedNotice.target.screen, 'post');
+  assert.equal(followedNotice.target.postId, followedPost.id);
+  assert.equal(followedNotice.readAt, null);
+  assert.equal((await posts.getPostById(followedNotice.target.postId)).content, followedPost.content);
+  assert.equal((await postNoticeApi.getNotifications()).length, 1, 'Refresh không nhân đôi thông báo');
+
+  sessions.saveSession(issueSession(authorDung));
+  const dungPostNotices = await postNoticeApi.getNotifications();
+  assert.equal(dungPostNotices.length, 1);
+  assert.equal(dungPostNotices[0].sourceId, followedPost.id);
+  sessions.saveSession(issueSession(authorMai));
+  assert.equal((await postNoticeApi.getNotifications()).length, 0, 'Không tự thông báo cho tác giả');
+  sessions.saveSession(issueSession({ id: '4', name: 'Sơn', email: 'son@example.com' }));
+  assert.equal((await postNoticeApi.getNotifications()).length, 0, 'Người không theo dõi không nhận');
+  sessions.saveSession(primarySession);
+  await assert.rejects(postNoticeApi.markNotificationRead(dungPostNotices[0].id), (error) => error.status === 404);
+  await postNoticeApi.markNotificationRead(followedNotice.id);
+  assert.equal((await postNoticeApi.getNotifications())[0].readAt, clock);
+  await posts.updatePost('2', followedPost.id, 'Sửa bài không tạo thông báo mới');
+  await posts.toggleReaction('1', followedPost.id, 'heart');
+  assert.equal((await postNoticeApi.getNotifications()).length, 1);
+  assert.equal(publicationEvents, 1, 'Sửa bài và cảm xúc không phát lại sự kiện bài mới');
+  postNoticeStore.savePosts(postNoticeStore.loadPosts(), postNoticeStore.loadPostNotifications());
+  assert.equal(publicationEvents, 1);
+  assert.equal((await postNoticeApi.getNotifications())[0].readAt, clock, 'Dữ liệu đăng bài không ghi đè trạng thái đã đọc');
+
+  const sharedByDung = await posts.sharePost(authorDung, followedPost.id, 'Dũng chia sẻ');
+  followedNotices = await postNoticeApi.getNotifications();
+  assert.ok(followedNotices.some((item) => item.sourceId === sharedByDung.id && item.actorName === 'Dũng'));
+  assert.ok(followedNotices.find((item) => item.sourceId === sharedByDung.id).message.includes('chia sẻ'));
+  await postNoticeFriends.unfollowPerson('2');
+  const missedPost = await posts.createPost(authorMai, 'Bài sau khi bỏ theo dõi');
+  followedNotices = await postNoticeApi.getNotifications();
+  assert.equal(followedNotices.some((item) => item.sourceId === missedPost.id), false);
+  assert.ok(followedNotices.some((item) => item.id === followedNotice.id), 'Bỏ theo dõi vẫn giữ lịch sử thông báo');
+  await postNoticeFriends.followPerson('2');
+  assert.equal((await postNoticeApi.getNotifications()).some((item) => item.sourceId === missedPost.id), false, 'Theo dõi lại không gửi bài đã bỏ lỡ');
+  const afterRefollowPost = await posts.createPost(authorMai, 'Bài sau khi theo dõi lại');
+  assert.ok((await postNoticeApi.getNotifications()).some((item) => item.sourceId === afterRefollowPost.id));
+  const simulatedPost = await load('src/dev/demoActivity.ts').simulateFollowedPost();
+  assert.equal(simulatedPost.authorId, '2');
+  assert.ok((await postNoticeApi.getNotifications()).some((item) => item.sourceId === simulatedPost.id), 'Nút thử tạo bài và thông báo qua cùng luồng thật');
+
+  const beforeFailedPublication = values.get('chatapp-posts');
+  const socialBeforeFailedPublication = values.get(friendKey);
+  const eventCountBeforeFailure = publicationEvents;
+  const postNotificationSetItem = storage.setItem;
+  storage.setItem = () => { throw new Error('Storage full'); };
+  try {
+    await assert.rejects(posts.createPost(authorMai, 'Không lưu được'), /Không lưu được/);
+    await assert.rejects(posts.sharePost(authorDung, afterRefollowPost.id), /Không lưu được/);
+    assert.equal(values.get('chatapp-posts'), beforeFailedPublication);
+    assert.equal(values.get(friendKey), socialBeforeFailedPublication);
+    assert.equal(publicationEvents, eventCountBeforeFailure, 'Bài lưu lỗi không phát thông báo');
+  } finally { storage.setItem = postNotificationSetItem; }
+  values.set(friendKey, '{broken');
+  await assert.rejects(posts.createPost(authorMai, 'Dữ liệu người nhận bị lỗi'), (error) => error.code === 'STORAGE_READ');
+  assert.equal(values.get('chatapp-posts'), beforeFailedPublication);
+  values.set(friendKey, socialBeforeFailedPublication);
+  await posts.deletePost('2', followedPost.id);
+  assert.ok((await postNoticeApi.getNotifications()).some((item) => item.id === followedNotice.id));
+  await assert.rejects(posts.getPostById(followedNotice.target.postId), /không còn tồn tại/);
+  await postNoticeApi.markAllNotificationsRead();
+  assert.ok((await postNoticeApi.getNotifications()).every((item) => item.readAt !== null));
+  const persistedPostNoticeCount = (await postNoticeApi.getNotifications()).length;
+  stopPublicationEvents();
+  modules = new Map();
+  postNoticeApi = load('src/api/notifications.ts');
+  postNoticeFriends = load('src/api/friends.ts');
+  load('src/dev/mockTransport.ts').configureMockNetwork({ delayMs: 0 });
+  const reloadedPostNotices = await postNoticeApi.getNotifications();
+  assert.equal(reloadedPostNotices.length, persistedPostNoticeCount);
+  assert.ok(reloadedPostNotices.every((item) => item.readAt !== null), 'Reload giữ lịch sử và trạng thái đã đọc');
+  await postNoticeFriends.unfollowPerson('2');
+  await postNoticeFriends.unfollowPerson('3');
+  const beforeEmptyFollowSimulation = values.get('chatapp-posts');
+  await assert.rejects(load('src/dev/demoActivity.ts').simulateFollowedPost(), /chưa theo dõi ai/);
+  assert.equal(values.get('chatapp-posts'), beforeEmptyFollowSimulation);
+  values.set(friendKey, noticeSocialSnapshot);
+  values.set('chatapp-posts', noticePostsSnapshot);
+  console.log('PASS: thông báo bài mới đúng người theo dõi tại lúc đăng, không tự báo/trùng/hồi tố, mở đúng bài, lịch sử/đã đọc, chia sẻ, bỏ theo dõi, nút thử và lưu bài/thông báo nguyên tử.');
 
   values.set('chatapp-session', '{broken');
   assert.equal(sessions.loadSession(), null);

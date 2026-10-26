@@ -20,6 +20,7 @@ type PostCardProps = {
   onUpdated: (post: Post) => void;
   onDeleted: (postId: string) => void;
   onShared: (post: Post) => void;
+  initialCommentsExpanded?: boolean;
 };
 
 export default function PostCard({
@@ -28,6 +29,7 @@ export default function PostCard({
   onUpdated,
   onDeleted,
   onShared,
+  initialCommentsExpanded = false,
 }: PostCardProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -36,7 +38,7 @@ export default function PostCard({
   const [error, setError] = useState('');
   const [sharing, setSharing] = useState(false);
   const [notice, setNotice] = useState('');
-  const [commentsExpanded, setCommentsExpanded] = useState(false);
+  const [commentsExpanded, setCommentsExpanded] = useState(initialCommentsExpanded);
   const [commentCount, setCommentCount] = useState<number | null>(null);
   const reactionBusy = useRef(false);
 

@@ -1,3 +1,4 @@
+import { validNotifications } from '../utils/notificationValidation';
 import { ApiError } from '../core/network/ApiError';
 import type { FollowRelation, FriendRelation } from '../types/friends';
 import type { AppNotification } from '../types/notifications';
@@ -27,22 +28,6 @@ function validFollows(value: unknown): value is FollowRelation[] {
     typeof item.fromId === 'string' && item.fromId.trim().length > 0 &&
     typeof item.toId === 'string' && item.toId.trim().length > 0 && item.fromId !== item.toId) &&
     new Set(value.map((item) => JSON.stringify([item.fromId, item.toId]))).size === value.length;
-}
-
-function validNotifications(value: unknown): value is AppNotification[] {
-  if (!Array.isArray(value)) return false;
-  return value.every((item) => item && typeof item === 'object' &&
-    typeof item.id === 'string' && item.id.length > 0 &&
-    typeof item.recipientId === 'string' && item.recipientId.length > 0 &&
-    ['friend_request', 'friend_accepted', 'friend_connected', 'system'].includes(item.type) &&
-    (item.actorName === null || typeof item.actorName === 'string') &&
-    typeof item.message === 'string' &&
-    (item.sourceId === null || typeof item.sourceId === 'string') &&
-    typeof item.createdAt === 'number' && Number.isFinite(item.createdAt) &&
-    (item.readAt === null || (typeof item.readAt === 'number' && Number.isFinite(item.readAt))) &&
-    item.target && (item.target.screen === 'profile' ||
-      (item.target.screen === 'friends' && ['friends', 'incoming'].includes(item.target.tab)))) &&
-    new Set(value.map((item) => item.id)).size === value.length;
 }
 
 export function loadSocialState(): SocialSnapshot | null {

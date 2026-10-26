@@ -1,3 +1,5 @@
+import { notificationsForPublishedPost } from '../dev/postNotificationData';
+import { readMockSocialState } from '../dev/socialState';
 import type { User } from './auth';
 import { getImage, MAX_POST_IMAGES, type PostImage } from './media';
 import { removeImages } from '../storage/media';
@@ -117,7 +119,7 @@ export async function createPost(user: User, content: string, images: PostImage[
 
   // Đọc danh sách mới nhất ngay trước khi lưu để không bỏ mất bài vừa được tạo.
   const posts = [post, ...readPosts()];
-  savePosts(posts);
+  savePosts(posts, notificationsForPublishedPost(post, readMockSocialState().follows));
   return withCurrentAuthor(post, posts);
 }
 
@@ -258,6 +260,6 @@ export async function sharePost(user: User, postId: string, content = ''): Promi
     sharedPostId: original.id,
   };
   const updated = [shared, ...posts];
-  savePosts(updated);
+  savePosts(updated, notificationsForPublishedPost(shared, readMockSocialState().follows));
   return withCurrentAuthor(shared, updated);
 }

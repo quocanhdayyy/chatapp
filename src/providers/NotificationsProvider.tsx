@@ -1,3 +1,4 @@
+import { POSTS_STORAGE_KEY, subscribePostNotifications } from '../storage/posts';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type PropsWithChildren } from 'react';
 import { getNotifications, markAllNotificationsRead, markNotificationRead, type AppNotification } from '../api/notifications';
 import { SOCIAL_STORAGE_KEY, subscribeSocialState } from '../storage/social';
@@ -59,14 +60,16 @@ export function NotificationsProvider({ children }: PropsWithChildren) {
       // Thao tác đánh dấu đã đọc tự áp dụng kết quả API, không cần tải lặp.
       if (!mutating.current) void refresh();
     });
+    const unsubscribePosts = subscribePostNotifications(() => { void refresh(); });
     const onStorage = (event: StorageEvent) => {
-      if (event.key === SOCIAL_STORAGE_KEY || event.key === null) void refresh();
+      if (event.key === SOCIAL_STORAGE_KEY || event.key === POSTS_STORAGE_KEY || event.key === null) void refresh();
     };
     window.addEventListener('storage', onStorage);
     return () => {
       active.current = false;
       requestVersion.current += 1;
       unsubscribe();
+      unsubscribePosts();
       window.removeEventListener('storage', onStorage);
     };
   }, [refresh]);

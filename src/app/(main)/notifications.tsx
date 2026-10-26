@@ -9,6 +9,7 @@ export default function NotificationsRoute() {
 
   function openTarget(target: NotificationTarget) {
     if (target.screen === 'friends') router.push({ pathname: '/friends', params: { tab: target.tab } });
+    else if (target.screen === 'post') router.push({ pathname: '/posts/[id]', params: { id: target.postId } });
     else router.push('/profile');
   }
 
