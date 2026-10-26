@@ -4,6 +4,14 @@ import { removeImages } from '../storage/media';
 import { loadPosts, savePosts } from '../storage/posts';
 import { loadProfile } from '../storage/profile';
 
+export type SharedPost = {
+  id: string;
+  authorId: string;
+  author: string;
+  content: string;
+  images: PostImage[];
+};
+
 export type Post = {
   id: string;
   authorId: string;
@@ -12,6 +20,10 @@ export type Post = {
   likes: number;
   likedBy: string[];
   images: PostImage[];
+  sharedPostId?: string;
+  // Hai trường này được tính từ danh sách hiện tại, không lưu bản sao bài gốc.
+  sharedPost?: SharedPost | null;
+  shareCount?: number;
 };
 
 export const MAX_POST_LENGTH = 2000;
@@ -41,14 +53,29 @@ function readPosts(): Post[] {
   return loadPosts() ?? initialPosts.map((post) => ({ ...post }));
 }
 
-function withCurrentAuthor(post: Post): Post {
-  const profile = loadProfile(post.authorId);
-  return { ...post, likedBy: [...post.likedBy], images: post.images.map((image) => ({ ...image })), author: profile?.name ?? post.author };
+function withCurrentAuthor(post: Post, posts: Post[]): Post {
+  const originalId = post.sharedPostId ?? post.id;
+  const original = post.sharedPostId ? posts.find((item) => item.id === originalId && !item.sharedPostId) : undefined;
+  return {
+    ...post,
+    author: loadProfile(post.authorId)?.name ?? post.author,
+    likedBy: [...post.likedBy],
+    images: post.images.map((image) => ({ ...image })),
+    shareCount: posts.filter((item) => item.sharedPostId === originalId).length,
+    sharedPost: post.sharedPostId ? (original ? {
+      id: original.id,
+      authorId: original.authorId,
+      author: loadProfile(original.authorId)?.name ?? original.author,
+      content: original.content,
+      images: original.images.map((image) => ({ ...image })),
+    } : null) : undefined,
+  };
 }
 
 export async function getPosts(): Promise<Post[]> {
   await new Promise((resolve) => setTimeout(resolve, 600));
-  return readPosts().map(withCurrentAuthor);
+  const posts = readPosts();
+  return posts.map((post) => withCurrentAuthor(post, posts));
 }
 
 export async function createPost(user: User, content: string, images: PostImage[] = []): Promise<Post> {
@@ -82,8 +109,9 @@ export async function createPost(user: User, content: string, images: PostImage[
   };
 
   // Đọc danh sách mới nhất ngay trước khi lưu để không bỏ mất bài vừa được tạo.
-  savePosts([post, ...readPosts()]);
-  return { ...post };
+  const posts = [post, ...readPosts()];
+  savePosts(posts);
+  return withCurrentAuthor(post, posts);
 }
 
 function findOwnPost(posts: Post[], userId: string, postId: string): Post {
@@ -111,7 +139,7 @@ export async function updatePost(
   const currentPost = findOwnPost(posts, userId, postId);
   const text = content.trim();
 
-  if (!text && currentPost.images.length === 0) {
+  if (!text && currentPost.images.length === 0 && !currentPost.sharedPostId) {
     throw new Error('Vui lòng nhập nội dung hoặc giữ ảnh cho bài viết.');
   }
 
@@ -119,7 +147,7 @@ export async function updatePost(
     throw new Error(`Bài viết không được vượt quá ${MAX_POST_LENGTH} ký tự.`);
   }
 
-  const updatedPost = withCurrentAuthor({ ...currentPost, content: text });
+  const updatedPost = withCurrentAuthor({ ...currentPost, content: text }, posts);
   savePosts(posts.map((post) => post.id === postId ? updatedPost : post));
   return { ...updatedPost };
 }
@@ -159,7 +187,7 @@ export async function toggleLike(userId: string, postId: string): Promise<Post> 
     likedBy: alreadyLiked
       ? post.likedBy.filter((id) => id !== userId)
       : [...post.likedBy, userId],
-  });
+  }, posts);
 
   savePosts(posts.map((item) => item.id === postId ? updatedPost : item));
   return updatedPost;
@@ -168,11 +196,48 @@ export async function toggleLike(userId: string, postId: string): Promise<Post> 
 export async function getPostById(postId: string): Promise<Post> {
   await new Promise((resolve) => setTimeout(resolve, 600));
 
-  const post = readPosts().find((item) => item.id === postId);
+  const posts = readPosts();
+  const post = posts.find((item) => item.id === postId);
 
   if (!post) {
     throw new Error('Bài viết không còn tồn tại.');
   }
 
-  return withCurrentAuthor(post);
+  return withCurrentAuthor(post, posts);
+}
+
+// Chia sẻ tạo một bài mới của người chia sẻ và chỉ tham chiếu ID bài gốc.
+export async function sharePost(user: User, postId: string, content = ''): Promise<Post> {
+  await new Promise((resolve) => setTimeout(resolve, 600));
+
+  if (!user || typeof user.id !== 'string' || !user.id.trim()) {
+    throw new Error('Vui lòng đăng nhập để chia sẻ bài viết.');
+  }
+  const text = content.trim();
+  if (text.length > MAX_POST_LENGTH) {
+    throw new Error(`Lời nhắn không được vượt quá ${MAX_POST_LENGTH} ký tự.`);
+  }
+
+  const posts = readPosts();
+  const selected = posts.find((post) => post.id === postId);
+  if (!selected) throw new Error('Bài viết không còn tồn tại.');
+
+  // Chia sẻ lại một bài đã chia sẻ vẫn trỏ thẳng đến bài gốc, tránh lồng nhiều tầng.
+  const originalId = selected.sharedPostId ?? selected.id;
+  const original = posts.find((post) => post.id === originalId && !post.sharedPostId);
+  if (!original) throw new Error('Bài viết gốc không còn tồn tại, không thể chia sẻ.');
+
+  const shared: Post = {
+    id: crypto.randomUUID(),
+    authorId: user.id,
+    author: loadProfile(user.id)?.name ?? user.name,
+    content: text,
+    likes: 0,
+    likedBy: [],
+    images: [],
+    sharedPostId: original.id,
+  };
+  const updated = [shared, ...posts];
+  savePosts(updated);
+  return withCurrentAuthor(shared, updated);
 }

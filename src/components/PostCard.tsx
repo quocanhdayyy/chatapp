@@ -1,11 +1,14 @@
 import { theme } from '../core/theme';
-import { useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { User } from '../api/auth';
 import { deletePost, MAX_POST_LENGTH, toggleLike, updatePost, type Post } from '../api/posts';
 import CommentsSection from './CommentsSection';
 import PostImages from './PostImages';
+import SharePostDialog from './SharePostDialog';
+import SharedPostPreview from './SharedPostPreview';
 import AppButton from './ui/AppButton';
 import UserAvatar from './ui/UserAvatar';
 import Icon from './ui/Icon';
@@ -15,6 +18,7 @@ type PostCardProps = {
   user: User;
   onUpdated: (post: Post) => void;
   onDeleted: (postId: string) => void;
+  onShared: (post: Post) => void;
 };
 
 export default function PostCard({
@@ -22,16 +26,24 @@ export default function PostCard({
   user,
   onUpdated,
   onDeleted,
+  onShared,
 }: PostCardProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [busy, setBusy] = useState<'' | 'saving' | 'deleting' | 'liking'>('');
   const [error, setError] = useState('');
+  const [sharing, setSharing] = useState(false);
+  const [notice, setNotice] = useState('');
 
   const currentUserId = user.id;
   const isOwner = post.authorId === currentUserId;
   const liked = post.likedBy.includes(currentUserId);
+  const canShare = !post.sharedPostId || !!post.sharedPost;
+
+  useFocusEffect(useCallback(() => {
+    return () => { setSharing(false); };
+  }, []));
 
   function handleEdit() {
     if (busy) return;
@@ -98,7 +110,7 @@ export default function PostCard({
   return <View style={styles.card}>
     <View style={styles.header}>
       <UserAvatar userId={post.authorId} name={displayName} size={43} />
-      <View style={styles.identity}><Text style={styles.author}>{displayName}</Text><Text style={styles.meta}>{isOwner ? 'Bài viết của bạn' : 'Thành viên'}</Text></View>
+      <View style={styles.identity}><Text style={styles.author}>{displayName}</Text><Text style={styles.meta}>{post.sharedPostId ? 'Đã chia sẻ bài viết' : isOwner ? 'Bài viết của bạn' : 'Thành viên'}</Text></View>
       {isOwner && !editing && !confirmingDelete && <View style={styles.ownerActions}>
         <Pressable onPress={handleEdit} disabled={!!busy} accessibilityRole="button" accessibilityLabel="Sửa bài viết" style={styles.iconButton}><Icon name="edit" size={16} color={theme.colors.muted} /></Pressable>
         <Pressable onPress={() => { setError(''); setConfirmingDelete(true); }} disabled={!!busy} accessibilityRole="button" accessibilityLabel="Xóa bài viết" style={styles.iconButton}><Icon name="trash" size={16} color={theme.colors.muted} /></Pressable>
@@ -110,14 +122,33 @@ export default function PostCard({
       <View style={styles.actions}><AppButton label="Lưu thay đổi" icon="check" onPress={handleSave} loading={busy === 'saving'} disabled={!!busy} /><AppButton label="Hủy" onPress={handleCancel} disabled={!!busy} variant="secondary" /></View>
     </View> : !!post.content && <Text style={styles.content}>{post.content}</Text>}
     <PostImages images={post.images} />
+    {!!post.sharedPostId && <SharedPostPreview post={post.sharedPost} />}
     {!editing && !confirmingDelete && <View style={styles.reactions}>
+      <View style={styles.reactionRow}>
       <Pressable style={[styles.likeButton, liked && styles.likedButton, !!busy && styles.disabled]} onPress={handleLike} disabled={!!busy} accessibilityRole="button" accessibilityLabel={liked ? 'Bỏ thích bài viết' : 'Thích bài viết'} accessibilityState={{ selected: liked, disabled: !!busy }}>
         <Icon name="heart" size={18} color={liked ? theme.colors.accent : theme.colors.muted} filled={liked} /><Text style={[styles.likeText, liked && styles.likedText]}>{busy === 'liking' ? 'Đang cập nhật…' : liked ? 'Đã thích' : 'Thích'}</Text><View style={styles.countDivider} /><Text style={[styles.likeCount, liked && styles.likedText]}>{post.likes}</Text>
       </Pressable>
+        <Pressable
+          onPress={() => { setNotice(''); setSharing(true); }}
+          disabled={!!busy || !canShare}
+          accessibilityRole="button"
+          accessibilityLabel="Chia sẻ bài viết"
+          accessibilityState={{ disabled: !!busy || !canShare }}
+          style={[styles.likeButton, (!!busy || !canShare) && styles.disabled]}
+        >
+          <Icon name="share" size={18} color={theme.colors.muted} />
+          <Text style={styles.likeText}>Chia sẻ{post.shareCount ? ` (${post.shareCount})` : ''}</Text>
+        </Pressable>
+      </View>
       <CommentsSection postId={post.id} user={user} disabled={!!busy} />
     </View>}
     {confirmingDelete && <View style={styles.confirmation}><Text style={styles.confirmText}>Bạn muốn xóa bài viết này?</Text><View style={styles.actions}><AppButton label="Xác nhận xóa" icon="trash" onPress={handleDelete} loading={busy === 'deleting'} disabled={!!busy} variant="danger" /><AppButton label="Hủy" onPress={handleCancel} disabled={!!busy} variant="secondary" /></View></View>}
     {!!error && <Text style={styles.error} accessibilityRole="alert">{error}</Text>}
+    {!!notice && <Text style={styles.notice} accessibilityLiveRegion="polite">{notice}</Text>}
+    {sharing && <SharePostDialog post={post} user={user} onClose={() => setSharing(false)} onShared={(created) => {
+      onShared(created);
+      setNotice('Đã chia sẻ bài viết lên bảng tin của bạn.');
+    }} />}
   </View>;
 }
 
@@ -131,6 +162,8 @@ const styles = StyleSheet.create({
   iconButton: { height: 32, width: 32, borderRadius: 10, backgroundColor: theme.colors.background, justifyContent: 'center', alignItems: 'center' },
   content: { fontSize: 15, marginTop: 16, marginBottom: 3, lineHeight: 25, color: theme.colors.text },
   reactions: { borderTopWidth: 1, borderTopColor: theme.colors.border, marginTop: 21, paddingTop: 16 },
+  reactionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
+  notice: { color: theme.colors.success, marginTop: 12, fontSize: 13, lineHeight: 21 },
   likeButton: { alignSelf: 'flex-start', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 6, backgroundColor: theme.colors.surface, flexDirection: 'row', alignItems: 'center', gap: 9, minHeight: 40 },
   likedButton: { backgroundColor: theme.colors.accentSoft },
   likeText: { color: theme.colors.muted, fontSize: 12, fontWeight: '600' },

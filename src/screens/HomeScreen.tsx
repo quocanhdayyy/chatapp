@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ComponentRef } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useRef, useState, type ComponentRef } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import type { User } from '../api/auth';
 import { getPosts, type Post } from '../api/posts';
@@ -10,6 +11,7 @@ import PostComposer from '../components/PostComposer';
 import Icon from '../components/ui/Icon';
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/StateViews';
 import { theme } from '../core/theme';
+import { addPostToFeed, removePostFromFeed, updatePostInFeed } from '../utils/postUpdates';
 
 type Props = { user: User; onLogout: () => void; onOpenProfile: () => void; onOpenFriends: () => void; initialOwnOnly?: boolean; autoCompose?: boolean };
 
@@ -17,29 +19,30 @@ export default function HomeScreen({ user, onLogout, onOpenProfile, onOpenFriend
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [reload, setReload] = useState(0);
   const [ownOnly, setOwnOnly] = useState(initialOwnOnly);
   const { width } = useWindowDimensions();
   const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
   const inputRef = useRef<ComponentRef<typeof TextInput>>(null);
+  const loadVersion = useRef(0);
 
-  useEffect(() => {
-    let active = true;
-    async function loadPosts() {
-      setLoading(true);
-      setError('');
-      try {
-        const data = await getPosts();
-        if (active) setPosts(data);
-      } catch {
-        if (active) setError('Không tải được bảng tin.');
-      } finally {
-        if (active) setLoading(false);
-      }
+  const load = useCallback(async () => {
+    const version = ++loadVersion.current;
+    setLoading(true);
+    setError('');
+    try {
+      const data = await getPosts();
+      if (version === loadVersion.current) setPosts(data);
+    } catch {
+      if (version === loadVersion.current) setError('Không tải được bảng tin.');
+    } finally {
+      if (version === loadVersion.current) setLoading(false);
     }
-    void loadPosts();
-    return () => { active = false; };
-  }, [reload]);
+  }, []);
+
+  useFocusEffect(useCallback(() => {
+    void load();
+    return () => { loadVersion.current += 1; };
+  }, [load]));
 
   useEffect(() => {
     if (autoCompose && !loading && !error) inputRef.current?.focus();
@@ -71,7 +74,7 @@ export default function HomeScreen({ user, onLogout, onOpenProfile, onOpenFriend
           <View style={[styles.columns, !showWidgets && styles.singleColumn]}>
             <View style={styles.feed}>
               <PostComposer autoFocus={autoCompose} user={user} inputRef={inputRef} disabled={loading || error !== ''} onPublished={(post) => {
-                setPosts((current) => [post, ...current]);
+                setPosts((current) => addPostToFeed(current, post));
                 setOwnOnly(false);
               }} />
               <View style={styles.feedHeading}>
@@ -82,18 +85,22 @@ export default function HomeScreen({ user, onLogout, onOpenProfile, onOpenFriend
                     </Pressable>
                   ))}
                 </View>
-                <Pressable onPress={() => setReload((value) => value + 1)} disabled={loading} accessibilityRole="button" accessibilityLabel="Làm mới bảng tin" style={styles.refresh}>
+                <Pressable onPress={() => { void load(); }} disabled={loading} accessibilityRole="button" accessibilityLabel="Làm mới bảng tin" style={styles.refresh}>
                   <Icon name="refresh" size={17} color={theme.colors.muted} />
                 </Pressable>
               </View>
               {loading ? <LoadingState message="Đang tải bài viết…" /> : error ? (
-                <ErrorState message={error} onRetry={() => setReload((value) => value + 1)} />
+                <ErrorState message={error} onRetry={() => { void load(); }} />
               ) : visiblePosts.length === 0 ? (
                 <EmptyState message={ownOnly ? 'Bạn chưa có bài viết nào.' : 'Chưa có bài viết.'} />
               ) : visiblePosts.map((post) => (
                 <PostCard key={post.id} post={post} user={user}
-                  onUpdated={(updated) => setPosts((current) => current.map((item) => item.id === updated.id ? updated : item))}
-                  onDeleted={(id) => setPosts((current) => current.filter((item) => item.id !== id))}
+                  onUpdated={(updated) => setPosts((current) => updatePostInFeed(current, updated))}
+                  onDeleted={(id) => setPosts((current) => removePostFromFeed(current, id))}
+                  onShared={(shared) => {
+                    setPosts((current) => addPostToFeed(current, shared));
+                    scrollRef.current?.scrollTo({ y: 0, animated: true });
+                  }}
                 />
               ))}
             </View>

@@ -333,6 +333,89 @@ async function main() {
   await posts.deletePost('1', post.id);
   await assert.rejects(posts.getPostById(post.id), /không còn tồn tại/);
 
+  const feedUpdates = load('src/utils/postUpdates.ts');
+  const sharingOriginal = await posts.createPost(relogged.user, 'Nội dung bài gốc');
+  const sharingUser = { id: '2', name: 'Mai', email: 'mai@example.com' };
+  let sharingFeed = await posts.getPosts();
+  const sharedOnce = await posts.sharePost(sharingUser, sharingOriginal.id, '  Mọi người xem nhé  ');
+  assert.notEqual(sharedOnce.id, sharingOriginal.id);
+  assert.equal(sharedOnce.authorId, '2');
+  assert.equal(sharedOnce.content, 'Mọi người xem nhé');
+  assert.equal(sharedOnce.sharedPostId, sharingOriginal.id);
+  assert.equal(sharedOnce.sharedPost.content, 'Nội dung bài gốc');
+  assert.equal(sharedOnce.shareCount, 1);
+  assert.equal(sharedOnce.likes, 0);
+  assert.equal(sharedOnce.images.length, 0, 'Không sao chép ảnh gốc vào bài chia sẻ');
+  sharingFeed = feedUpdates.addPostToFeed(sharingFeed, sharedOnce);
+  assert.equal(sharingFeed[0].id, sharedOnce.id);
+  assert.equal(sharingFeed.find((item) => item.id === sharingOriginal.id).shareCount, 1);
+
+  const sharedAgain = await posts.sharePost(relogged.user, sharedOnce.id);
+  assert.equal(sharedAgain.content, '', 'Cho phép chia sẻ không kèm lời nhắn');
+  assert.equal(sharedAgain.sharedPostId, sharingOriginal.id, 'Chia sẻ lại trỏ thẳng đến bài gốc');
+  assert.equal(sharedAgain.shareCount, 2);
+  sharingFeed = feedUpdates.addPostToFeed(sharingFeed, sharedAgain);
+  assert.equal(sharingFeed.find((item) => item.id === sharedOnce.id).shareCount, 2);
+
+  const rawSharing = JSON.parse(values.get('chatapp-posts'));
+  assert.equal(rawSharing.find((item) => item.id === sharedOnce.id).sharedPost, undefined);
+  assert.equal(rawSharing.find((item) => item.id === sharedOnce.id).shareCount, undefined);
+  const restoredSharing = load('src/storage/posts.ts').loadPosts();
+  assert.equal(restoredSharing.find((item) => item.id === sharedAgain.id).sharedPostId, sharingOriginal.id);
+  assert.equal((await posts.getPostById(sharedAgain.id)).sharedPost.content, 'Nội dung bài gốc');
+
+  const editedOriginal = await posts.updatePost('1', sharingOriginal.id, 'Bài gốc đã chỉnh sửa');
+  sharingFeed = feedUpdates.updatePostInFeed(sharingFeed, editedOriginal);
+  assert.equal(sharingFeed.find((item) => item.id === sharedOnce.id).sharedPost.content, 'Bài gốc đã chỉnh sửa');
+  assert.equal((await posts.getPostById(sharedAgain.id)).sharedPost.content, 'Bài gốc đã chỉnh sửa');
+  await posts.updatePost('2', sharedOnce.id, '');
+  assert.equal((await posts.getPostById(sharingOriginal.id)).content, 'Bài gốc đã chỉnh sửa');
+  await assert.rejects(posts.updatePost('1', sharedOnce.id, 'Không phải bài của mình'), /chỉ được sửa/);
+  await assert.rejects(posts.deletePost('1', sharedOnce.id), /chỉ được sửa/);
+  assert.equal((await posts.toggleLike('1', sharedOnce.id)).likes, 1);
+  assert.equal((await posts.getPostById(sharingOriginal.id)).likes, 0, 'Like bài chia sẻ không thay đổi Like bài gốc');
+  const sharedComment = await comments.createComment(relogged.user, sharedOnce.id, 'Bình luận ở bài chia sẻ');
+  assert.equal((await comments.getComments(sharedOnce.id)).length, 1);
+  assert.equal((await comments.getComments(sharingOriginal.id)).length, 0);
+  await comments.deleteComment('1', sharedOnce.id, sharedComment.id);
+
+  const beforeSharingFailure = values.get('chatapp-posts');
+  await assert.rejects(posts.sharePost(sharingUser, sharingOriginal.id, 'x'.repeat(posts.MAX_POST_LENGTH + 1)), /không được vượt quá/);
+  await assert.rejects(posts.sharePost(sharingUser, 'missing-post'), /không còn tồn tại/);
+  await assert.rejects(posts.sharePost({ ...sharingUser, id: '' }, sharingOriginal.id), /đăng nhập/);
+  assert.equal(values.get('chatapp-posts'), beforeSharingFailure);
+  const saveBeforeShareFailure = storage.setItem;
+  storage.setItem = () => { throw new Error('Storage full'); };
+  try {
+    await assert.rejects(posts.sharePost(sharingUser, sharingOriginal.id, 'Thử lại sau'), /Không lưu được/);
+    assert.equal(values.get('chatapp-posts'), beforeSharingFailure);
+  } finally { storage.setItem = saveBeforeShareFailure; }
+
+  await posts.deletePost('2', sharedOnce.id);
+  sharingFeed = feedUpdates.removePostFromFeed(sharingFeed, sharedOnce.id);
+  assert.equal(sharingFeed.find((item) => item.id === sharingOriginal.id).shareCount, 1);
+  assert.equal((await posts.getPostById(sharingOriginal.id)).shareCount, 1);
+  assert.ok((await posts.getPostById(sharedAgain.id)).sharedPost);
+  await posts.deletePost('1', sharingOriginal.id);
+  sharingFeed = feedUpdates.removePostFromFeed(sharingFeed, sharingOriginal.id);
+  assert.equal(sharingFeed.find((item) => item.id === sharedAgain.id).sharedPost, null);
+  assert.equal((await posts.getPostById(sharedAgain.id)).sharedPost, null);
+  await assert.rejects(posts.sharePost(sharingUser, sharedAgain.id), /Bài viết gốc không còn tồn tại/);
+  await posts.updatePost('1', sharedAgain.id, 'Lời nhắn vẫn sửa được sau khi bài gốc bị xóa');
+  await posts.deletePost('1', sharedAgain.id);
+
+  const beforeLegacyPosts = values.get('chatapp-posts');
+  values.set('chatapp-posts', JSON.stringify([{ id: 'old', authorId: '1', author: 'Cũ', content: 'Bài cũ', likes: 2 }]));
+  const legacyPosts = await posts.getPosts();
+  assert.equal(legacyPosts[0].images.length, 0);
+  assert.equal(legacyPosts[0].likedBy.length, 0);
+  assert.equal(legacyPosts[0].shareCount, 0);
+  assert.equal(legacyPosts[0].sharedPostId, undefined);
+  await posts.sharePost(sharingUser, 'old');
+  assert.equal((await posts.getPostById('old')).likes, 2);
+  values.set('chatapp-posts', beforeLegacyPosts);
+  console.log('PASS: chia sẻ có/không lời nhắn, chia sẻ lại, lưu/reload, sửa/xóa bài gốc, quyền sở hữu, Like/bình luận riêng, bộ đếm, dữ liệu cũ và lỗi lưu.');
+
   values.set('chatapp-session', '{broken');
   assert.equal(sessions.loadSession(), null);
   values.set('chatapp-session', JSON.stringify({ user: { id: '1' } }));

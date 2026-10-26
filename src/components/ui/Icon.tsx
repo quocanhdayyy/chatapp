@@ -2,6 +2,7 @@ import Svg, { Path } from 'react-native-svg';
 import { theme } from '../../core/theme';
 
 const paths = {
+  share: 'M14 3v5C6 8 3 12 3 20c2-5 5-7 11-7v5l8-7-8-8Z',
   more: 'M5 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm7 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm7 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z',
   camera: 'M3 7h4l2-3h6l2 3h4v13H3V7Zm13 6a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z',
   map: 'M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0Zm-5 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',

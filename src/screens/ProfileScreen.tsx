@@ -19,6 +19,7 @@ import UserAvatar from '../components/ui/UserAvatar';
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/StateViews';
 import { theme } from '../core/theme';
 import { removeImages } from '../storage/media';
+import { addPostToFeed, removePostFromFeed, updatePostInFeed } from '../utils/postUpdates';
 
 type Props = { user: User; onBack: () => void; onEdit: () => void; onChangePassword: () => void; onFriends: () => void; onLogout: () => void };
 
@@ -142,9 +143,12 @@ export default function ProfileScreen({ user, onBack, onEdit, onChangePassword, 
               {friendsPanel(true)}
             </View>
             <View style={[styles.feed, width < 900 && styles.stackedFeed]}>
-              <PostComposer user={{ ...user, name: profile.name }} inputRef={inputRef} disabled={loading || !!postsError} onPublished={(post) => setPosts((current) => [post, ...current])} />
+              <PostComposer user={{ ...user, name: profile.name }} inputRef={inputRef} disabled={loading || !!postsError} onPublished={(post) => setPosts((current) => addPostToFeed(current, post))} />
               <View style={styles.postHeading}><Text style={styles.cardTitle}>Bài viết{!loading && !postsError ? ` (${posts.length})` : ''}</Text><Pressable onPress={retry} disabled={loading} accessibilityRole="button" accessibilityLabel="Làm mới bài viết cá nhân" style={styles.refresh}><Icon name="refresh" size={18} color={theme.colors.muted} /></Pressable></View>
-              {postsError ? <ErrorState message={postsError} onRetry={retry} /> : loading ? <LoadingState /> : posts.length === 0 ? <EmptyState message="Bạn chưa có bài viết nào." /> : posts.map((post) => <PostCard key={post.id} post={post} user={{ ...user, name: profile.name }} onUpdated={(updated) => setPosts((current) => current.map((item) => item.id === updated.id ? updated : item))} onDeleted={(id) => setPosts((current) => current.filter((item) => item.id !== id))} />)}
+              {postsError ? <ErrorState message={postsError} onRetry={retry} /> : loading ? <LoadingState /> : posts.length === 0 ? <EmptyState message="Bạn chưa có bài viết nào." /> : posts.map((post) => <PostCard key={post.id} post={post} user={{ ...user, name: profile.name }} onUpdated={(updated) => setPosts((current) => updatePostInFeed(current, updated))} onDeleted={(id) => setPosts((current) => removePostFromFeed(current, id))} onShared={(shared) => {
+                setPosts((current) => addPostToFeed(current, shared));
+                scrollRef.current?.scrollTo({ y: contentY.current, animated: true });
+              }} />)}
             </View>
           </View> : tab === 'about' ? <View style={styles.about}><ProfileIntro profile={profile} onEdit={onEdit} /><AppButton label="Đổi mật khẩu" icon="lock" onPress={onChangePassword} variant="secondary" /></View> : tab === 'friends' ? friendsPanel() : photosPanel()}
         </View>
