@@ -128,7 +128,7 @@ export default function CommentsSection({
             <Text style={styles.muted}>Chưa có bình luận. Hãy viết bình luận đầu tiên!</Text>
           ) : (
             comments.map((comment) => (
-              <CommentCard key={comment.id} author={comment.author} content={comment.content}>
+              <CommentCard key={comment.id} authorId={comment.authorId} author={comment.author} content={comment.content}>
 
                 {comment.authorId === user.id && (
                   confirmDeleteId === comment.id ? (
