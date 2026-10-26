@@ -4,7 +4,6 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 
 
 import type { User } from '../api/auth';
 import CommentCard from './shared/CommentCard';
-import Icon from './ui/Icon';
 import {
   createComment,
   deleteComment,
@@ -17,17 +16,19 @@ type CommentsSectionProps = {
   postId: string;
   user: User;
   disabled?: boolean;
+  expanded: boolean;
+  onCountChange: (count: number) => void;
 };
 
 export default function CommentsSection({
   postId,
   user,
   disabled = false,
+  expanded,
+  onCountChange,
 }: CommentsSectionProps) {
-  const [expanded, setExpanded] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(false);
-  const [hasLoaded, setHasLoaded] = useState(false);
   const [reload, setReload] = useState(0);
   const [loadError, setLoadError] = useState('');
   const [error, setError] = useState('');
@@ -42,6 +43,8 @@ export default function CommentsSection({
     let active = true;
 
     async function load() {
+      setConfirmDeleteId(null);
+      setError('');
       setLoading(true);
       setLoadError('');
 
@@ -49,7 +52,7 @@ export default function CommentsSection({
         const data = await getComments(postId);
         if (active) {
           setComments(data);
-          setHasLoaded(true);
+          onCountChange(data.length);
         }
       } catch (err) {
         if (active) setLoadError(err instanceof Error ? err.message : 'Không tải được bình luận.');
@@ -60,7 +63,7 @@ export default function CommentsSection({
 
     load();
     return () => { active = false; };
-  }, [expanded, postId, reload]);
+  }, [expanded, postId, reload, onCountChange]);
 
   async function handleSend() {
     if (busy || loading || loadError) return;
@@ -75,6 +78,7 @@ export default function CommentsSection({
     try {
       const comment = await createComment(user, postId, content);
       setComments((current) => [...current, comment]);
+      onCountChange(comments.length + 1);
       setContent('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không gửi được bình luận.');
@@ -91,6 +95,7 @@ export default function CommentsSection({
     try {
       await deleteComment(user.id, postId, commentId);
       setComments((current) => current.filter((comment) => comment.id !== commentId));
+      onCountChange(Math.max(0, comments.length - 1));
       setConfirmDeleteId(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không xóa được bình luận.');
@@ -99,93 +104,77 @@ export default function CommentsSection({
     }
   }
 
+  if (!expanded) return null;
+
   return (
-    <View style={styles.section}>
-      <Pressable
-        onPress={() => { setExpanded((current) => !current); setError(''); setConfirmDeleteId(null); }}
-        disabled={busy}
-        accessibilityRole="button"
-        accessibilityState={{ expanded }}
-        style={styles.toggle}
-      >
-        <Icon name="comment" size={17} color={theme.colors.primary} /><Text style={styles.link}>
-          {expanded ? 'Ẩn bình luận' : 'Bình luận'}{hasLoaded ? ` (${comments.length})` : ''}
-        </Text>
-      </Pressable>
-
-      {expanded && (
-        <View style={styles.body}>
-          {loading ? (
-            <ActivityIndicator color={theme.colors.primary} accessibilityLabel="Đang tải bình luận" />
-          ) : loadError ? (
-            <View>
-              <Text style={styles.error} accessibilityRole="alert">{loadError}</Text>
-              <Pressable onPress={() => setReload((current) => current + 1)} disabled={busy} accessibilityRole="button">
-                <Text style={styles.link}>Thử tải lại</Text>
-              </Pressable>
-            </View>
-          ) : comments.length === 0 ? (
-            <Text style={styles.muted}>Chưa có bình luận. Hãy viết bình luận đầu tiên!</Text>
-          ) : (
-            comments.map((comment) => (
-              <CommentCard key={comment.id} authorId={comment.authorId} author={comment.author} content={comment.content}>
-
-                {comment.authorId === user.id && (
-                  confirmDeleteId === comment.id ? (
-                    <View style={styles.confirmation}>
-                      <Text>Xóa bình luận này?</Text>
-                      <View style={styles.actions}>
-                        <Pressable onPress={() => handleDelete(comment.id)} disabled={busy} accessibilityRole="button" accessibilityLabel="Xác nhận xóa bình luận">
-                          <Text style={styles.danger}>{deletingId === comment.id ? 'Đang xóa…' : 'Xác nhận xóa'}</Text>
-                        </Pressable>
-                        <Pressable onPress={() => setConfirmDeleteId(null)} disabled={busy} accessibilityRole="button">
-                          <Text style={styles.link}>Hủy</Text>
-                        </Pressable>
-                      </View>
-                    </View>
-                  ) : (
-                    <Pressable onPress={() => { setError(''); setConfirmDeleteId(comment.id); }} disabled={busy} accessibilityRole="button" accessibilityLabel="Xóa bình luận">
-                      <Text style={styles.deleteLink}>Xóa</Text>
-                    </Pressable>
-                  )
-                )}
-              </CommentCard>
-            ))
-          )}
-
-          <TextInput
-            style={styles.input}
-            placeholder="Viết bình luận…"
-            placeholderTextColor={theme.colors.subtle}
-            value={content}
-            onChangeText={(value) => { setContent(value); setError(''); }}
-            multiline
-            maxLength={MAX_COMMENT_LENGTH}
-            editable={!busy && !loading && !loadError}
-            accessibilityLabel="Nội dung bình luận"
-          />
-
-          <View style={styles.actions}>
-            <Text style={styles.muted}>{content.length}/{MAX_COMMENT_LENGTH} ký tự</Text>
-            <Pressable
-              onPress={handleSend}
-              disabled={busy || loading || !!loadError || !content.trim()}
-              style={[styles.button, (busy || loading || !!loadError || !content.trim()) && styles.disabled]}
-              accessibilityRole="button"
-            >
-              <Text style={styles.buttonText}>{sending ? 'Đang gửi…' : 'Gửi bình luận'}</Text>
-            </Pressable>
-          </View>
-          {error !== '' && <Text style={styles.error} accessibilityRole="alert">{error}</Text>}
+    <View style={styles.body}>
+      {loading ? (
+        <ActivityIndicator color={theme.colors.primary} accessibilityLabel="Đang tải bình luận" />
+      ) : loadError ? (
+        <View>
+          <Text style={styles.error} accessibilityRole="alert">{loadError}</Text>
+          <Pressable onPress={() => setReload((current) => current + 1)} disabled={busy} accessibilityRole="button">
+            <Text style={styles.link}>Thử tải lại</Text>
+          </Pressable>
         </View>
+      ) : comments.length === 0 ? (
+        <Text style={styles.muted}>Chưa có bình luận. Hãy viết bình luận đầu tiên!</Text>
+      ) : (
+        comments.map((comment) => (
+          <CommentCard key={comment.id} authorId={comment.authorId} author={comment.author} content={comment.content}>
+
+            {comment.authorId === user.id && (
+              confirmDeleteId === comment.id ? (
+                <View style={styles.confirmation}>
+                  <Text>Xóa bình luận này?</Text>
+                  <View style={styles.actions}>
+                    <Pressable onPress={() => handleDelete(comment.id)} disabled={busy} accessibilityRole="button" accessibilityLabel="Xác nhận xóa bình luận">
+                      <Text style={styles.danger}>{deletingId === comment.id ? 'Đang xóa…' : 'Xác nhận xóa'}</Text>
+                    </Pressable>
+                    <Pressable onPress={() => setConfirmDeleteId(null)} disabled={busy} accessibilityRole="button">
+                      <Text style={styles.link}>Hủy</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : (
+                <Pressable onPress={() => { setError(''); setConfirmDeleteId(comment.id); }} disabled={busy} accessibilityRole="button" accessibilityLabel="Xóa bình luận">
+                  <Text style={styles.deleteLink}>Xóa</Text>
+                </Pressable>
+              )
+            )}
+          </CommentCard>
+        ))
       )}
+
+      <TextInput
+        style={styles.input}
+        placeholder="Viết bình luận…"
+        placeholderTextColor={theme.colors.subtle}
+        value={content}
+        onChangeText={(value) => { setContent(value); setError(''); }}
+        multiline
+        maxLength={MAX_COMMENT_LENGTH}
+        editable={!busy && !loading && !loadError}
+        accessibilityLabel="Nội dung bình luận"
+      />
+
+      <View style={styles.actions}>
+        <Text style={styles.muted}>{content.length}/{MAX_COMMENT_LENGTH} ký tự</Text>
+        <Pressable
+          onPress={handleSend}
+          disabled={busy || loading || !!loadError || !content.trim()}
+          style={[styles.button, (busy || loading || !!loadError || !content.trim()) && styles.disabled]}
+          accessibilityRole="button"
+        >
+          <Text style={styles.buttonText}>{sending ? 'Đang gửi…' : 'Gửi bình luận'}</Text>
+        </Pressable>
+      </View>
+      {error !== '' && <Text style={styles.error} accessibilityRole="alert">{error}</Text>}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  section: { marginTop: 10 },
-  toggle: { alignSelf: 'flex-start', paddingVertical: 10, flexDirection: 'row', gap: 9, alignItems: 'center', paddingHorizontal: 2, minHeight: 40 },
   link: { color: theme.colors.primary, fontWeight: '600', fontSize: 12 },
   body: { borderTopWidth: 1, borderTopColor: theme.colors.border, paddingTop: 18, gap: 15, marginTop: 5 },
   muted: { color: theme.colors.muted, fontSize: 11, lineHeight: 19 },

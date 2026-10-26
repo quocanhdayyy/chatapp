@@ -4,6 +4,8 @@ import { removeImages } from '../storage/media';
 import { loadPosts, savePosts } from '../storage/posts';
 import { loadProfile } from '../storage/profile';
 
+export type ReactionType = 'like' | 'heart';
+
 export type SharedPost = {
   id: string;
   authorId: string;
@@ -19,6 +21,7 @@ export type Post = {
   content: string;
   likes: number;
   likedBy: string[];
+  reactions?: Record<string, ReactionType>;
   images: PostImage[];
   sharedPostId?: string;
   // Hai trường này được tính từ danh sách hiện tại, không lưu bản sao bài gốc.
@@ -36,6 +39,7 @@ const initialPosts: Post[] = [
     content: 'Hôm nay bắt đầu xây dựng ChatApp!',
     likes: 5,
     likedBy: [],
+    reactions: {},
     images: [],
   },
   {
@@ -45,6 +49,7 @@ const initialPosts: Post[] = [
     content: 'Xin chào mọi người!',
     likes: 12,
     likedBy: [],
+    reactions: {},
     images: [],
   },
 ];
@@ -60,6 +65,7 @@ function withCurrentAuthor(post: Post, posts: Post[]): Post {
     ...post,
     author: loadProfile(post.authorId)?.name ?? post.author,
     likedBy: [...post.likedBy],
+    reactions: { ...(post.reactions ?? Object.fromEntries(post.likedBy.map((id) => [id, 'like' as const]))) },
     images: post.images.map((image) => ({ ...image })),
     shareCount: posts.filter((item) => item.sharedPostId === originalId).length,
     sharedPost: post.sharedPostId ? (original ? {
@@ -105,6 +111,7 @@ export async function createPost(user: User, content: string, images: PostImage[
     content: text,
     likes: 0,
     likedBy: [],
+    reactions: {},
     images: storedImages.map(({ id, name }) => ({ id, name })),
   };
 
@@ -166,31 +173,43 @@ export async function deletePost(userId: string, postId: string): Promise<void> 
   await removeImages(unusedImageIds).catch(() => undefined);
 }
 
-export async function toggleLike(userId: string, postId: string): Promise<Post> {
+export function getReactionCounts(post: Post): { like: number; heart: number } {
+  const heart = Object.values(post.reactions ?? {}).filter((value) => value === 'heart').length;
+  // Các lượt thích mẫu/cũ chưa có ID vẫn được tính là Thích.
+  return { like: Math.max(0, post.likes - heart), heart };
+}
+
+export async function toggleReaction(userId: string, postId: string, reaction: ReactionType): Promise<Post> {
   await new Promise((resolve) => setTimeout(resolve, 600));
 
-  if (!userId.trim()) {
-    throw new Error('Vui lòng đăng nhập để thích bài viết.');
-  }
+  if (!userId.trim()) throw new Error('Vui lòng đăng nhập để bày tỏ cảm xúc.');
+  if (reaction !== 'like' && reaction !== 'heart') throw new Error('Chỉ hỗ trợ Thích hoặc Tim.');
 
   const posts = readPosts();
   const post = posts.find((item) => item.id === postId);
+  if (!post) throw new Error('Bài viết không còn tồn tại.');
 
-  if (!post) {
-    throw new Error('Bài viết không còn tồn tại.');
-  }
+  const reactions: Record<string, ReactionType> = {
+    ...(post.reactions ?? Object.fromEntries(post.likedBy.map((id) => [id, 'like' as const]))),
+  };
+  const previous = Object.hasOwn(reactions, userId) ? reactions[userId] : undefined;
+  const removing = previous === reaction;
+  if (removing) delete reactions[userId];
+  else reactions[userId] = reaction;
 
-  const alreadyLiked = post.likedBy.includes(userId);
   const updatedPost = withCurrentAuthor({
     ...post,
-    likes: Math.max(0, post.likes + (alreadyLiked ? -1 : 1)),
-    likedBy: alreadyLiked
-      ? post.likedBy.filter((id) => id !== userId)
-      : [...post.likedBy, userId],
+    likes: Math.max(0, post.likes + (removing ? -1 : previous ? 0 : 1)),
+    likedBy: Object.keys(reactions),
+    reactions,
   }, posts);
-
   savePosts(posts.map((item) => item.id === postId ? updatedPost : item));
   return updatedPost;
+}
+
+// Giữ hàm cũ để các chỗ đang gọi Like tiếp tục hoạt động.
+export async function toggleLike(userId: string, postId: string): Promise<Post> {
+  return toggleReaction(userId, postId, 'like');
 }
 
 export async function getPostById(postId: string): Promise<Post> {
@@ -234,6 +253,7 @@ export async function sharePost(user: User, postId: string, content = ''): Promi
     content: text,
     likes: 0,
     likedBy: [],
+    reactions: {},
     images: [],
     sharedPostId: original.id,
   };

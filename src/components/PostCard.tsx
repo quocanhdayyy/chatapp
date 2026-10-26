@@ -1,12 +1,13 @@
 import { theme } from '../core/theme';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { User } from '../api/auth';
-import { deletePost, MAX_POST_LENGTH, toggleLike, updatePost, type Post } from '../api/posts';
+import { deletePost, getReactionCounts, MAX_POST_LENGTH, toggleReaction, updatePost, type Post, type ReactionType } from '../api/posts';
 import CommentsSection from './CommentsSection';
 import PostImages from './PostImages';
+import ReactionButton from './ReactionButton';
 import SharePostDialog from './SharePostDialog';
 import SharedPostPreview from './SharedPostPreview';
 import AppButton from './ui/AppButton';
@@ -35,10 +36,14 @@ export default function PostCard({
   const [error, setError] = useState('');
   const [sharing, setSharing] = useState(false);
   const [notice, setNotice] = useState('');
+  const [commentsExpanded, setCommentsExpanded] = useState(false);
+  const [commentCount, setCommentCount] = useState<number | null>(null);
+  const reactionBusy = useRef(false);
 
   const currentUserId = user.id;
   const isOwner = post.authorId === currentUserId;
-  const liked = post.likedBy.includes(currentUserId);
+  const reaction = post.reactions?.[currentUserId] ?? (post.likedBy.includes(currentUserId) ? 'like' : null);
+  const counts = getReactionCounts(post);
   const canShare = !post.sharedPostId || !!post.sharedPost;
 
   useFocusEffect(useCallback(() => {
@@ -75,17 +80,19 @@ export default function PostCard({
     }
   }
 
-  async function handleLike() {
-    if (busy) return;
+  async function handleReaction(value: ReactionType) {
+    if (busy || reactionBusy.current) return;
+    reactionBusy.current = true;
     setBusy('liking');
     setError('');
 
     try {
-      const updatedPost = await toggleLike(currentUserId, post.id);
+      const updatedPost = await toggleReaction(currentUserId, post.id, value);
       onUpdated(updatedPost);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Không cập nhật được lượt thích.');
+      setError(err instanceof Error ? err.message : 'Không cập nhật được cảm xúc.');
     } finally {
+      reactionBusy.current = false;
       setBusy('');
     }
   }
@@ -124,23 +131,42 @@ export default function PostCard({
     <PostImages images={post.images} />
     {!!post.sharedPostId && <SharedPostPreview post={post.sharedPost} />}
     {!editing && !confirmingDelete && <View style={styles.reactions}>
+      {(post.likes > 0 || (commentCount ?? 0) > 0 || (post.shareCount ?? 0) > 0) && <View style={styles.summary}>
+        <View style={styles.reactionCounts}>
+          {counts.like > 0 && <View style={styles.countItem}><Icon name="thumb" size={14} color={theme.colors.like} /><Text style={styles.countText}>{counts.like}</Text></View>}
+          {counts.heart > 0 && <View style={styles.countItem}><Icon name="heart" size={14} color={theme.colors.heart} filled /><Text style={styles.countText}>{counts.heart}</Text></View>}
+        </View>
+        <Text style={styles.countText}>{[
+          commentCount ? `${commentCount} bình luận` : '',
+          post.shareCount ? `${post.shareCount} chia sẻ` : '',
+        ].filter(Boolean).join(' · ')}</Text>
+      </View>}
       <View style={styles.reactionRow}>
-      <Pressable style={[styles.likeButton, liked && styles.likedButton, !!busy && styles.disabled]} onPress={handleLike} disabled={!!busy} accessibilityRole="button" accessibilityLabel={liked ? 'Bỏ thích bài viết' : 'Thích bài viết'} accessibilityState={{ selected: liked, disabled: !!busy }}>
-        <Icon name="heart" size={18} color={liked ? theme.colors.accent : theme.colors.muted} filled={liked} /><Text style={[styles.likeText, liked && styles.likedText]}>{busy === 'liking' ? 'Đang cập nhật…' : liked ? 'Đã thích' : 'Thích'}</Text><View style={styles.countDivider} /><Text style={[styles.likeCount, liked && styles.likedText]}>{post.likes}</Text>
-      </Pressable>
+        <ReactionButton value={reaction} onReact={handleReaction} disabled={!!busy} loading={busy === 'liking'} />
+        <Pressable
+          onPress={() => setCommentsExpanded((value) => !value)}
+          disabled={!!busy}
+          accessibilityRole="button"
+          accessibilityLabel={commentsExpanded ? 'Ẩn bình luận' : 'Mở bình luận'}
+          accessibilityState={{ expanded: commentsExpanded, disabled: !!busy }}
+          style={({ pressed }) => [styles.actionButton, commentsExpanded && styles.activeAction, !!busy && styles.disabled, pressed && styles.pressed]}
+        >
+          <Icon name="comment" size={17} color={commentsExpanded ? theme.colors.primary : theme.colors.muted} />
+          <Text numberOfLines={1} style={[styles.actionText, commentsExpanded && styles.activeActionText]}>Bình luận</Text>
+        </Pressable>
         <Pressable
           onPress={() => { setNotice(''); setSharing(true); }}
           disabled={!!busy || !canShare}
           accessibilityRole="button"
           accessibilityLabel="Chia sẻ bài viết"
           accessibilityState={{ disabled: !!busy || !canShare }}
-          style={[styles.likeButton, (!!busy || !canShare) && styles.disabled]}
+          style={({ pressed }) => [styles.actionButton, (!!busy || !canShare) && styles.disabled, pressed && styles.pressed]}
         >
-          <Icon name="share" size={18} color={theme.colors.muted} />
-          <Text style={styles.likeText}>Chia sẻ{post.shareCount ? ` (${post.shareCount})` : ''}</Text>
+          <Icon name="share" size={17} color={theme.colors.muted} />
+          <Text numberOfLines={1} style={styles.actionText}>Chia sẻ</Text>
         </Pressable>
       </View>
-      <CommentsSection postId={post.id} user={user} disabled={!!busy} />
+      <CommentsSection postId={post.id} user={user} expanded={commentsExpanded} onCountChange={setCommentCount} disabled={!!busy} />
     </View>}
     {confirmingDelete && <View style={styles.confirmation}><Text style={styles.confirmText}>Bạn muốn xóa bài viết này?</Text><View style={styles.actions}><AppButton label="Xác nhận xóa" icon="trash" onPress={handleDelete} loading={busy === 'deleting'} disabled={!!busy} variant="danger" /><AppButton label="Hủy" onPress={handleCancel} disabled={!!busy} variant="secondary" /></View></View>}
     {!!error && <Text style={styles.error} accessibilityRole="alert">{error}</Text>}
@@ -161,15 +187,18 @@ const styles = StyleSheet.create({
   ownerActions: { flexDirection: 'row', gap: 6 },
   iconButton: { height: 32, width: 32, borderRadius: 10, backgroundColor: theme.colors.background, justifyContent: 'center', alignItems: 'center' },
   content: { fontSize: 15, marginTop: 16, marginBottom: 3, lineHeight: 25, color: theme.colors.text },
-  reactions: { borderTopWidth: 1, borderTopColor: theme.colors.border, marginTop: 21, paddingTop: 16 },
-  reactionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
+  reactions: { marginTop: 20 },
+  summary: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  reactionCounts: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  countItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  countText: { color: theme.colors.muted, fontSize: 12, lineHeight: 20 },
+  reactionRow: { flexDirection: 'row', alignItems: 'stretch', gap: 4, borderTopWidth: 1, borderTopColor: theme.colors.border, paddingTop: 6 },
+  actionButton: { flex: 1, minWidth: 0, minHeight: 40, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 5, paddingHorizontal: 4, borderRadius: 6 },
+  actionText: { color: theme.colors.muted, fontSize: 12, fontWeight: '600', flexShrink: 1 },
+  activeAction: { backgroundColor: theme.colors.primarySoft },
+  activeActionText: { color: theme.colors.primary },
+  pressed: { opacity: 0.65 },
   notice: { color: theme.colors.success, marginTop: 12, fontSize: 13, lineHeight: 21 },
-  likeButton: { alignSelf: 'flex-start', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 6, backgroundColor: theme.colors.surface, flexDirection: 'row', alignItems: 'center', gap: 9, minHeight: 40 },
-  likedButton: { backgroundColor: theme.colors.accentSoft },
-  likeText: { color: theme.colors.muted, fontSize: 12, fontWeight: '600' },
-  likedText: { color: theme.colors.accent },
-  likeCount: { color: theme.colors.muted, fontSize: 12 },
-  countDivider: { width: 1, height: 13, backgroundColor: theme.colors.border },
   actions: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 10 },
   editor: { marginTop: 20 },
   input: { borderWidth: 1, borderColor: theme.colors.border, borderRadius: 6, padding: 14, minHeight: 125, fontSize: 15, lineHeight: 25, textAlignVertical: 'top', backgroundColor: theme.colors.background, color: theme.colors.text },

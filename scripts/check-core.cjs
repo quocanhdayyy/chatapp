@@ -416,6 +416,69 @@ async function main() {
   values.set('chatapp-posts', beforeLegacyPosts);
   console.log('PASS: chia sẻ có/không lời nhắn, chia sẻ lại, lưu/reload, sửa/xóa bài gốc, quyền sở hữu, Like/bình luận riêng, bộ đếm, dữ liệu cũ và lỗi lưu.');
 
+  const reactionSource = await posts.createPost(relogged.user, 'Thử Thích và Tim');
+  const likedPost = await posts.toggleReaction('1', reactionSource.id, 'like');
+  assert.equal(likedPost.likes, 1);
+  assert.equal(likedPost.reactions['1'], 'like');
+  const heartedPost = await posts.toggleReaction('1', reactionSource.id, 'heart');
+  assert.equal(heartedPost.likes, 1, 'Đổi từ Thích sang Tim không tăng tổng');
+  assert.equal(heartedPost.reactions['1'], 'heart');
+  assert.equal(heartedPost.likedBy.length, 1);
+  assert.equal(posts.getReactionCounts(heartedPost).heart, 1);
+  assert.equal(posts.getReactionCounts(heartedPost).like, 0);
+  const otherLiked = await posts.toggleReaction('2', reactionSource.id, 'like');
+  assert.equal(otherLiked.likes, 2);
+  assert.equal(posts.getReactionCounts(otherLiked).like, 1);
+  assert.equal(posts.getReactionCounts(otherLiked).heart, 1);
+  const switchedBack = await posts.toggleReaction('1', reactionSource.id, 'like');
+  assert.equal(switchedBack.likes, 2, 'Đổi từ Tim sang Thích không tăng tổng');
+  assert.equal(posts.getReactionCounts(switchedBack).like, 2);
+  assert.equal(posts.getReactionCounts(switchedBack).heart, 0);
+  const removedReaction = await posts.toggleReaction('1', reactionSource.id, 'like');
+  assert.equal(removedReaction.likes, 1);
+  assert.equal(removedReaction.reactions['1'], undefined);
+  assert.equal(removedReaction.reactions['2'], 'like');
+  await posts.toggleReaction('1', reactionSource.id, 'heart');
+  const reactionRestored = await posts.getPostById(reactionSource.id);
+  assert.equal(reactionRestored.reactions['1'], 'heart');
+  assert.equal(reactionRestored.likes, 2);
+  const reactionSaved = load('src/storage/posts.ts').loadPosts().find((item) => item.id === reactionSource.id);
+  assert.equal(reactionSaved.reactions['1'], 'heart');
+  const afterReactionEdit = await posts.updatePost('1', reactionSource.id, 'Sửa bài giữ nguyên Tim');
+  assert.equal(afterReactionEdit.reactions['1'], 'heart');
+  assert.equal(afterReactionEdit.likes, 2);
+
+  const reactionShare = await posts.sharePost(sharingUser, reactionSource.id);
+  assert.equal((await posts.toggleReaction('1', reactionShare.id, 'heart')).likes, 1);
+  assert.equal((await posts.getPostById(reactionSource.id)).likes, 2, 'Cảm xúc bài chia sẻ độc lập với bài gốc');
+  assert.equal((await posts.toggleReaction('1', reactionShare.id, 'heart')).likes, 0, 'Chọn lại Tim để bỏ Tim');
+
+  const beforeReactionFailure = values.get('chatapp-posts');
+  await assert.rejects(posts.toggleReaction('1', reactionSource.id, 'unknown'), /Chỉ hỗ trợ/);
+  await assert.rejects(posts.toggleReaction('', reactionSource.id, 'like'), /đăng nhập/);
+  await assert.rejects(posts.toggleReaction('1', 'missing-post', 'heart'), /không còn tồn tại/);
+  assert.equal(values.get('chatapp-posts'), beforeReactionFailure);
+  const saveBeforeReactionFailure = storage.setItem;
+  storage.setItem = () => { throw new Error('Storage full'); };
+  try {
+    await assert.rejects(posts.toggleReaction('1', reactionSource.id, 'heart'), /Không lưu được/);
+    assert.equal(values.get('chatapp-posts'), beforeReactionFailure);
+  } finally { storage.setItem = saveBeforeReactionFailure; }
+
+  values.set('chatapp-posts', JSON.stringify([{ id: 'legacy-reaction', authorId: '1', author: 'Cũ', content: 'Like cũ', likes: 6, likedBy: ['1'] }]));
+  const migratedReaction = await posts.getPostById('legacy-reaction');
+  assert.equal(migratedReaction.likes, 6);
+  assert.equal(migratedReaction.reactions['1'], 'like');
+  const migratedHeart = await posts.toggleReaction('1', 'legacy-reaction', 'heart');
+  assert.equal(migratedHeart.likes, 6);
+  assert.equal(posts.getReactionCounts(migratedHeart).like, 5, 'Giữ các Like mẫu cũ chưa có ID');
+  assert.equal(posts.getReactionCounts(migratedHeart).heart, 1);
+  assert.equal((await posts.toggleReaction('1', 'legacy-reaction', 'heart')).likes, 5);
+  values.set('chatapp-posts', beforeReactionFailure);
+  await posts.deletePost('2', reactionShare.id);
+  await posts.deletePost('1', reactionSource.id);
+  console.log('PASS: Thích/Tim, đổi loại không tăng tổng, chọn lại để bỏ, mỗi người một cảm xúc, lưu sau reload/sửa bài, bài chia sẻ độc lập, dữ liệu Like cũ và lỗi lưu.');
+
   values.set('chatapp-session', '{broken');
   assert.equal(sessions.loadSession(), null);
   values.set('chatapp-session', JSON.stringify({ user: { id: '1' } }));

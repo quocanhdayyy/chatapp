@@ -14,6 +14,8 @@ export const theme = {
     border: '#E5E7EB',
     error: '#BC3846',
     success: '#2B7B59',
+    like: '#315D73',
+    heart: '#D44761',
     secondary: '#F1F3F5',
     onPrimary: '#FFFFFF',
   },

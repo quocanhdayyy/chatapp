@@ -1,4 +1,4 @@
-import type { Post } from '../api/posts';
+import type { Post, ReactionType } from '../api/posts';
 
 const STORAGE_KEY = 'chatapp-posts';
 
@@ -28,6 +28,14 @@ export function loadPosts(): Post[] | null {
         new Set(post.likedBy).size === post.likedBy.length &&
         post.likes >= post.likedBy.length
       )) &&
+      (post.reactions === undefined || (
+        post.reactions !== null &&
+        typeof post.reactions === 'object' &&
+        !Array.isArray(post.reactions) &&
+        Object.keys(post.reactions).every((id) => id.trim().length > 0) &&
+        Object.values(post.reactions).every((reaction) => reaction === 'like' || reaction === 'heart') &&
+        post.likes >= Object.keys(post.reactions).length
+      )) &&
       (post.images === undefined || (
         Array.isArray(post.images) &&
         post.images.length <= 4 &&
@@ -41,17 +49,23 @@ export function loadPosts(): Post[] | null {
 
     if (!valid) return null;
 
-    // Giữ dữ liệu cũ; bỏ các trường hiển thị được tính lại từ bài gốc.
-    return posts.map((post) => ({
-      id: post.id,
-      authorId: post.authorId,
-      author: post.author,
-      content: post.content,
-      likes: post.likes,
-      likedBy: [...(post.likedBy ?? [])],
-      images: (post.images ?? []).map((image: { id: string; name: string }) => ({ id: image.id, name: image.name })),
-      ...(post.sharedPostId ? { sharedPostId: post.sharedPostId } : {}),
-    }));
+    // Chuyển Like cũ thành Thích, giữ cả tổng lượt thích mẫu chưa có ID.
+    return posts.map((post) => {
+      const reactions: Record<string, ReactionType> = post.reactions
+        ? { ...post.reactions }
+        : Object.fromEntries((post.likedBy ?? []).map((id: string) => [id, 'like']));
+      return {
+        id: post.id,
+        authorId: post.authorId,
+        author: post.author,
+        content: post.content,
+        likes: post.likes,
+        likedBy: Object.keys(reactions),
+        reactions,
+        images: (post.images ?? []).map((image: { id: string; name: string }) => ({ id: image.id, name: image.name })),
+        ...(post.sharedPostId ? { sharedPostId: post.sharedPostId } : {}),
+      };
+    });
   } catch {
     return null;
   }
@@ -66,6 +80,7 @@ export function savePosts(posts: Post[]) {
       content: post.content,
       likes: post.likes,
       likedBy: post.likedBy,
+      reactions: post.reactions ?? Object.fromEntries(post.likedBy.map((id) => [id, 'like'])),
       images: post.images.map(({ id, name }) => ({ id, name })),
       ...(post.sharedPostId ? { sharedPostId: post.sharedPostId } : {}),
     }));
