@@ -1,5 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState, type ComponentRef } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import type { User } from '../api/auth';
@@ -27,6 +27,7 @@ export default function ProfileScreen({ user, onBack, onEdit, onChangePassword, 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [friends, setFriends] = useState<FriendEntry[]>([]);
+  const [followCounts, setFollowCounts] = useState<{ following: number; followers: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [postsError, setPostsError] = useState('');
@@ -55,8 +56,11 @@ export default function ProfileScreen({ user, onBack, onEdit, onChangePassword, 
     else setLoadError(profileResult.reason instanceof Error ? profileResult.reason.message : 'Không tải được hồ sơ.');
     if (postsResult.status === 'fulfilled') { setPosts(postsResult.value.filter((post) => post.authorId === user.id)); setPostsError(''); }
     else setPostsError('Không tải được bài viết cá nhân.');
-    if (friendsResult.status === 'fulfilled') { setFriends(friendsResult.value.filter((person) => person.relationship === 'friends')); setFriendsError(''); }
-    else setFriendsError('Không tải được danh sách bạn bè.');
+    if (friendsResult.status === 'fulfilled') {
+      setFriends(friendsResult.value.filter((person) => person.relationship === 'friends'));
+      setFollowCounts({ following: friendsResult.value.filter((person) => person.isFollowing).length, followers: friendsResult.value.filter((person) => person.followsYou).length });
+      setFriendsError('');
+    } else { setFollowCounts(null); setFriendsError('Không tải được danh sách bạn bè.'); }
     setLoading(false);
   }, [user.id]);
 
@@ -134,7 +138,10 @@ export default function ProfileScreen({ user, onBack, onEdit, onChangePassword, 
     <Header name={profile?.name ?? user.name} activeSection="profile" onFeed={onBack} onOpenFriends={onFriends} onLogout={onLogout} onOpenProfile={() => scrollRef.current?.scrollTo({ y: 0, animated: true })} />
     <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
       {loadError ? <View style={styles.loadPanel}><ErrorState message={loadError} onRetry={retry} /></View> : !profile ? <LoadingState message="Đang tải hồ sơ…" /> : <>
-        <ProfileHero profile={profile} friendCount={friendsError || loading ? null : friends.length} tab={tab} onTab={setTab} busy={imageBusy} onImage={(field) => { void changeImage(field); }} onEdit={onEdit} onPassword={onChangePassword} onWrite={writePost} canWrite={!loading && !postsError} error={imageError} notice={notice} />
+        <ProfileHero profile={profile} friendCount={friendsError || loading ? null : friends.length}
+          followCounts={loading ? null : followCounts}
+          onFollowing={() => router.push({ pathname: '/friends', params: { tab: 'following' } })}
+          onFollowers={() => router.push({ pathname: '/friends', params: { tab: 'followers' } })} tab={tab} onTab={setTab} busy={imageBusy} onImage={(field) => { void changeImage(field); }} onEdit={onEdit} onPassword={onChangePassword} onWrite={writePost} canWrite={!loading && !postsError} error={imageError} notice={notice} />
         <View onLayout={(event) => { contentY.current = event.nativeEvent.layout.y; }} style={[styles.body, width < 760 && styles.smallBody]}>
           {tab === 'posts' ? <View style={[styles.columns, width < 900 && styles.stacked]}>
             <View style={[styles.sidebar, width < 900 && styles.fullWidth]}>

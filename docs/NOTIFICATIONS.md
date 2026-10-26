@@ -31,6 +31,6 @@ File chính:
 - `src/dev/notificationData.ts`: dữ liệu mẫu và thông báo phát sinh từ quan hệ bạn bè.
 - `src/storage/social.ts`: lưu quan hệ và thông báo trong cùng một lần ghi, phát sự kiện để cập nhật số đếm.
 
-Để giữ dữ liệu bạn bè cũ, tiếp tục dùng khóa `chatapp-friend-relations`. Dữ liệu mảng cũ vẫn đọc được; lần lưu tiếp theo chuyển thành `{ version: 2, relations, notifications }`. Không cần xóa dữ liệu trình duyệt.
+Để giữ dữ liệu bạn bè cũ, tiếp tục dùng khóa `chatapp-friend-relations`. Dữ liệu mảng cũ vẫn đọc được; lần lưu tiếp theo chuyển thành `{ version: 3, relations, follows, notifications }`. Không cần xóa dữ liệu trình duyệt.
 
 Đây là thông báo trong app. Chưa gồm push trình duyệt, FCM, thông báo like/comment hay backend.

@@ -1,10 +1,11 @@
+import { addNewFriendFollows } from '../utils/follows';
 import { ApiError } from '../core/network/ApiError';
 import type { HttpRequest } from '../core/network/contracts';
 import { saveSocialState } from '../storage/social';
 import { readMockSocialState } from './socialState';
 import { notificationsAfterFriendChange } from './notificationData';
 import { loadProfile } from '../storage/profile';
-import type { FriendEntry, FriendRelation } from '../types/friends';
+import type { FollowRelation, FriendEntry, FriendRelation } from '../types/friends';
 import { demoPeople } from './friendsData';
 
 function requirePerson(personId: string) {
@@ -18,7 +19,7 @@ function between(relation: FriendRelation, firstId: string, secondId: string): b
     (relation.fromId === secondId && relation.toId === firstId);
 }
 
-function listPeople(userId: string, relations: FriendRelation[]): FriendEntry[] {
+function listPeople(userId: string, relations: FriendRelation[], follows: FollowRelation[]): FriendEntry[] {
   return demoPeople.filter((person) => person.id !== userId).map((person) => {
     const relation = relations.find((item) => between(item, userId, person.id));
     const profile = loadProfile(person.id);
@@ -28,6 +29,8 @@ function listPeople(userId: string, relations: FriendRelation[]): FriendEntry[] 
       bio: profile?.bio ?? person.bio,
       relationship: !relation ? 'none' : relation.status === 'accepted' ? 'friends' : relation.toId === userId ? 'incoming' : 'outgoing',
       relationId: relation?.id ?? null,
+      isFollowing: follows.some((follow) => follow.fromId === userId && follow.toId === person.id),
+      followsYou: follows.some((follow) => follow.fromId === person.id && follow.toId === userId),
     };
   });
 }
@@ -60,7 +63,22 @@ export function handleFriendsRequest(request: HttpRequest, userId: string): Frie
   requirePerson(userId);
   const state = readMockSocialState();
   const relations = state.relations;
-  if (request.method === 'GET' && request.path === '/friends') return listPeople(userId, relations);
+  if (request.method === 'GET' && request.path === '/friends') return listPeople(userId, relations, state.follows);
+
+  const followMatch = request.path.match(/^\/friends\/([^/]+)\/(follow|unfollow)$/);
+  if (request.method === 'POST' && followMatch) {
+    const personId = decodeURIComponent(followMatch[1]);
+    requirePerson(personId);
+    if (personId === userId) throw new ApiError('Bạn không thể theo dõi chính mình.', 400, 'SELF_FOLLOW');
+    const following = state.follows.some((follow) => follow.fromId === userId && follow.toId === personId);
+    const shouldFollow = followMatch[2] === 'follow';
+    // Yêu cầu lặp cùng trạng thái không tạo bản ghi hoặc ghi storage lần nữa.
+    if (following === shouldFollow) return listPeople(userId, relations, state.follows);
+    const follows = shouldFollow ? [...state.follows, { fromId: userId, toId: personId }]
+      : state.follows.filter((follow) => follow.fromId !== userId || follow.toId !== personId);
+    saveSocialState({ ...state, follows });
+    return listPeople(userId, relations, follows);
+  }
 
   let updated: FriendRelation[];
   if (request.method === 'POST' && request.path === '/friends/requests') {
@@ -84,6 +102,7 @@ export function handleFriendsRequest(request: HttpRequest, userId: string): Frie
   }
 
   // Chỉ trả kết quả thành công sau khi thay đổi đã được lưu.
-  saveSocialState({ version: 2, relations: updated, notifications: notificationsAfterFriendChange(relations, updated, state.notifications) });
-  return listPeople(userId, updated);
+  const follows = addNewFriendFollows(state.follows, relations, updated);
+  saveSocialState({ version: 3, relations: updated, follows, notifications: notificationsAfterFriendChange(relations, updated, state.notifications) });
+  return listPeople(userId, updated, follows);
 }

@@ -26,3 +26,11 @@ export function cancelFriendRequest(requestId: string): Promise<FriendEntry[]> {
 export function removeFriend(personId: string): Promise<FriendEntry[]> {
   return apiClient.post(`/friends/${encodeURIComponent(personId)}/remove`, {});
 }
+
+export function followPerson(personId: string): Promise<FriendEntry[]> {
+  return apiClient.post(`/friends/${encodeURIComponent(personId)}/follow`, {});
+}
+
+export function unfollowPerson(personId: string): Promise<FriendEntry[]> {
+  return apiClient.post(`/friends/${encodeURIComponent(personId)}/unfollow`, {});
+}

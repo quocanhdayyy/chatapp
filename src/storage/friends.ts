@@ -1,3 +1,4 @@
+import { addNewFriendFollows, followsForFriends } from '../utils/follows';
 import type { FriendRelation } from '../types/friends';
 import { loadSocialState, saveSocialState } from './social';
 
@@ -9,5 +10,8 @@ export function loadFriendRelations(): FriendRelation[] | null {
 
 export function saveFriendRelations(relations: FriendRelation[]): void {
   const state = loadSocialState();
-  saveSocialState({ version: 2, relations, notifications: state?.notifications ?? [] });
+  saveSocialState({
+    version: 3, relations, notifications: state?.notifications ?? [],
+    follows: addNewFriendFollows(state?.follows ?? followsForFriends(state?.relations ?? []), state?.relations ?? [], relations),
+  });
 }

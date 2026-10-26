@@ -19,12 +19,13 @@ export default function FriendRow({ person, busyAction, disabled, confirmingRemo
 
   return (
     <View style={styles.row}>
-      <View style={[styles.main, width < 650 && styles.narrow]}>
+      <View style={[styles.main, width < 1100 && styles.narrow]}>
         <View style={styles.identity}>
           <UserAvatar userId={person.id} name={person.name} size={48} />
           <View style={styles.info}>
             <Text style={styles.name}>{person.name}</Text>
             <Text style={styles.bio} numberOfLines={2}>{person.bio}</Text>
+            {person.followsYou && <Text style={styles.followsYou}>Đang theo dõi bạn</Text>}
           </View>
         </View>
         {!confirmingRemove && <View style={styles.actions}>
@@ -38,6 +39,14 @@ export default function FriendRow({ person, busyAction, disabled, confirmingRemo
             <AppButton label="Hủy lời mời" onPress={() => onAction('cancel')} disabled={disabled} loading={busyAction === 'cancel'} variant="secondary" />
           </>}
           {person.relationship === 'friends' && <AppButton label="Hủy kết bạn" onPress={onConfirmRemove} disabled={disabled} variant="secondary" />}
+          <AppButton
+            label={person.isFollowing ? 'Bỏ theo dõi' : 'Theo dõi'}
+            icon={person.isFollowing ? 'check' : 'plus'}
+            onPress={() => onAction(person.isFollowing ? 'unfollow' : 'follow')}
+            disabled={disabled}
+            loading={busyAction === 'follow' || busyAction === 'unfollow'}
+            variant="secondary"
+          />
         </View>}
       </View>
       {confirmingRemove && <View style={styles.confirmation}>
@@ -59,6 +68,7 @@ const styles = StyleSheet.create({
   info: { flex: 1, gap: 5 },
   name: { fontSize: 15, fontWeight: '600', lineHeight: 22, color: theme.colors.text },
   bio: { fontSize: 13, lineHeight: 20, color: theme.colors.muted },
+  followsYou: { color: theme.colors.primary, fontSize: 11, lineHeight: 18 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, flexShrink: 0 },
   status: { fontSize: 12, color: theme.colors.muted },
   confirmation: { backgroundColor: theme.colors.background, padding: 16, borderRadius: 6, gap: 12 },

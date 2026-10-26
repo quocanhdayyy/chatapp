@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import type { User } from '../api/auth';
-import { acceptFriendRequest, cancelFriendRequest, declineFriendRequest, getFriends, removeFriend, sendFriendRequest, type FriendAction, type FriendEntry, type FriendTab } from '../api/friends';
+import { acceptFriendRequest, cancelFriendRequest, declineFriendRequest, followPerson, getFriends, removeFriend, unfollowPerson, sendFriendRequest, type FriendAction, type FriendEntry, type FriendTab } from '../api/friends';
 import CommunitySidebar from '../components/CommunitySidebar';
 import FriendRow from '../components/FriendRow';
 import Header from '../components/Header';
@@ -15,12 +15,14 @@ const tabs: { key: FriendTab; label: string }[] = [
   { key: 'friends', label: 'Tất cả bạn bè' },
   { key: 'incoming', label: 'Lời mời nhận' },
   { key: 'outgoing', label: 'Đã gửi' },
+  { key: 'following', label: 'Đang theo dõi' },
+  { key: 'followers', label: 'Người theo dõi' },
   { key: 'discover', label: 'Tìm bạn' },
 ];
 
-const actions = { send: sendFriendRequest, accept: acceptFriendRequest, decline: declineFriendRequest, cancel: cancelFriendRequest, remove: removeFriend };
-const successMessages: Record<FriendAction, string> = { send: 'Đã gửi lời mời kết bạn.', accept: 'Đã chấp nhận lời mời kết bạn.', decline: 'Đã từ chối lời mời.', cancel: 'Đã hủy lời mời đã gửi.', remove: 'Đã hủy kết bạn.' };
-const emptyMessages: Record<FriendTab, string> = { friends: 'Bạn chưa có bạn bè. Mở mục Tìm bạn để gửi lời mời.', incoming: 'Không có lời mời kết bạn mới.', outgoing: 'Bạn chưa gửi lời mời kết bạn nào.', discover: 'Chưa có người dùng để hiển thị.' };
+const actions = { send: sendFriendRequest, accept: acceptFriendRequest, decline: declineFriendRequest, cancel: cancelFriendRequest, remove: removeFriend, follow: followPerson, unfollow: unfollowPerson };
+const successMessages: Record<FriendAction, string> = { send: 'Đã gửi lời mời kết bạn.', accept: 'Đã kết bạn và theo dõi nhau.', decline: 'Đã từ chối lời mời.', cancel: 'Đã hủy lời mời đã gửi.', remove: 'Đã hủy kết bạn.', follow: 'Đã theo dõi.', unfollow: 'Đã bỏ theo dõi.' };
+const emptyMessages: Record<FriendTab, string> = { friends: 'Bạn chưa có bạn bè. Mở mục Tìm bạn để gửi lời mời.', incoming: 'Không có lời mời kết bạn mới.', outgoing: 'Bạn chưa gửi lời mời kết bạn nào.', discover: 'Chưa có người dùng để hiển thị.', following: 'Bạn chưa theo dõi ai. Mở mục Tìm bạn để theo dõi.', followers: 'Chưa có người theo dõi bạn.' };
 
 function searchable(value: string) {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase();
@@ -77,7 +79,7 @@ export default function FriendsScreen({ initialTab = 'friends', user, onLogout, 
 
   async function handleAction(action: FriendAction, person: FriendEntry) {
     if (busyRef.current || loading || loadError) return;
-    const target = action === 'send' || action === 'remove' ? person.id : person.relationId;
+    const target = ['send', 'remove', 'follow', 'unfollow'].includes(action) ? person.id : person.relationId;
     if (!target) return;
     busyRef.current = true;
     setBusy({ personId: person.id, action });
@@ -121,12 +123,18 @@ export default function FriendsScreen({ initialTab = 'friends', user, onLogout, 
   }
 
   const search = searchable(query.trim());
-  const visible = people.filter((person) => (tab === 'discover' || person.relationship === tab) && searchable(`${person.name} ${person.email}`).includes(search));
+  const visible = people.filter((person) => {
+    const inTab = tab === 'following' ? person.isFollowing : tab === 'followers' ? person.followsYou
+      : tab === 'discover' || person.relationship === tab;
+    return inTab && searchable(`${person.name} ${person.email}`).includes(search);
+  });
   const counts = {
     friends: people.filter((person) => person.relationship === 'friends').length,
     incoming: people.filter((person) => person.relationship === 'incoming').length,
     outgoing: people.filter((person) => person.relationship === 'outgoing').length,
     discover: people.length,
+    following: people.filter((person) => person.isFollowing).length,
+    followers: people.filter((person) => person.followsYou).length,
   };
 
   return (

@@ -5,7 +5,7 @@ import FriendsScreen from '../../screens/FriendsScreen';
 export default function FriendsRoute() {
   const { user, signOut } = useAuth();
   const { tab } = useLocalSearchParams<{ tab?: string }>();
-  const initialTab = tab === 'incoming' || tab === 'outgoing' || tab === 'discover' ? tab : 'friends';
+  const initialTab = tab === 'incoming' || tab === 'outgoing' || tab === 'discover' || tab === 'following' || tab === 'followers' ? tab : 'friends';
   if (!user) return null;
   return <FriendsScreen key={initialTab} initialTab={initialTab} user={user} onLogout={() => { void signOut(); }}
     onFeed={() => router.push('/')}

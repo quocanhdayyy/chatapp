@@ -13,9 +13,11 @@ type Props = {
   onTab: (tab: ProfileTab) => void; onImage: (field: ProfileImageField) => void;
   onEdit: () => void; onPassword: () => void; onWrite: () => void; canWrite: boolean;
   error: string; notice: string;
+  followCounts: { following: number; followers: number } | null;
+  onFollowing: () => void; onFollowers: () => void;
 };
 
-export default function ProfileHero({ profile, friendCount, tab, busy, onTab, onImage, onEdit, onPassword, onWrite, canWrite, error, notice }: Props) {
+export default function ProfileHero({ profile, friendCount, tab, busy, onTab, onImage, onEdit, onPassword, onWrite, canWrite, error, notice, followCounts, onFollowing, onFollowers }: Props) {
   const { width } = useWindowDimensions();
   const cover = useStoredImage(profile.coverImageId);
   const avatar = useStoredImage(profile.avatarImageId);
@@ -44,7 +46,11 @@ export default function ProfileHero({ profile, friendCount, tab, busy, onTab, on
           </View>
           <View style={[styles.details, small && styles.smallDetails]}>
             <Text style={[styles.name, small && styles.smallName]} accessibilityRole="header">{profile.name}</Text>
+            <View style={styles.stats}>
             <Pressable onPress={() => onTab('friends')} accessibilityRole="button"><Text style={styles.friendCount}>{friendCount === null ? 'Bạn bè' : `${friendCount} người bạn`}</Text></Pressable>
+              <Pressable onPress={onFollowers} accessibilityRole="button"><Text style={styles.friendCount}>{followCounts ? `${followCounts.followers} người theo dõi` : 'Người theo dõi'}</Text></Pressable>
+              <Pressable onPress={onFollowing} accessibilityRole="button"><Text style={styles.friendCount}>{followCounts ? `Đang theo dõi ${followCounts.following}` : 'Đang theo dõi'}</Text></Pressable>
+            </View>
             {!!summary && <Text numberOfLines={2} style={styles.summary}>{summary}</Text>}
             {!!avatar.error && <Pressable onPress={avatar.retry} accessibilityRole="button"><Text style={styles.retry}>Thử tải lại ảnh đại diện</Text></Pressable>}
           </View>
@@ -83,6 +89,7 @@ const styles = StyleSheet.create({
   smallDetails: { flex: 0, width: '100%', paddingBottom: 0 },
   name: { fontSize: 32, fontWeight: '700', lineHeight: 40, color: theme.colors.text },
   smallName: { fontSize: 27, lineHeight: 35 },
+  stats: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12 },
   friendCount: { color: theme.colors.muted, fontSize: 14, fontWeight: '600' },
   summary: { color: theme.colors.muted, fontSize: 13, lineHeight: 21 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingBottom: 12, flexWrap: 'wrap', maxWidth: 440 },

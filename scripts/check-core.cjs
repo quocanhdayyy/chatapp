@@ -188,7 +188,7 @@ async function main() {
   values.set(friendKey, JSON.stringify(legacyRelations));
   notices = await notificationsApi.markNotificationRead('welcome:1');
   assert.equal(notices.find((item) => item.id === 'welcome:1').readAt, clock);
-  assert.equal(JSON.parse(values.get(friendKey)).version, 2);
+  assert.equal(JSON.parse(values.get(friendKey)).version, 3);
   assert.equal(JSON.stringify(JSON.parse(values.get(friendKey)).relations), JSON.stringify(legacyRelations));
   const writesBeforeRepeatRead = writes;
   await notificationsApi.markNotificationRead('welcome:1');
@@ -320,6 +320,101 @@ async function main() {
   assert.equal(stateOf(people, '7').relationship, 'outgoing', 'Có thể thử lại sau khi lỗi đã được giải quyết');
   console.log('PASS: bạn bè, lời mời hai chiều, quyền thao tác, chống gửi trùng, lưu sau reload và xử lý lỗi mạng/storage.');
   console.log('PASS: thông báo đúng người nhận, đọc một/tất cả, chống ghi lặp, liên kết lời mời, lịch sử sau reload và chuyển dữ liệu cũ.');
+
+  const followSnapshot = values.get(friendKey);
+  const followRelations = [
+    { id: 'follow-fixture-friend', fromId: '1', toId: '2', status: 'accepted' },
+    { id: 'follow-fixture-request', fromId: '3', toId: '1', status: 'pending' },
+    { id: 'follow-failure-request', fromId: '7', toId: '1', status: 'pending' },
+  ];
+  const followNotice = { id: 'follow-fixture-notice', recipientId: '1', type: 'system', actorName: null, message: 'Thông báo kiểm tra', sourceId: null, createdAt: clock, readAt: null, target: { screen: 'profile' } };
+  values.set(friendKey, JSON.stringify({ version: 2, relations: followRelations, notifications: [followNotice] }));
+  const beforeFollowMigrationRead = writes;
+  let followPeople = await reloadedFriends.getFriends();
+  assert.equal(stateOf(followPeople, '2').isFollowing, true, 'Bạn bè cũ được theo dõi mặc định');
+  assert.equal(stateOf(followPeople, '2').followsYou, true);
+  assert.equal(stateOf(followPeople, '3').isFollowing, false, 'Lời mời chờ chưa tự theo dõi');
+  assert.equal(writes, beforeFollowMigrationRead, 'Đọc dữ liệu cũ không tự ghi lại');
+  followPeople = await reloadedFriends.unfollowPerson('2');
+  assert.equal(stateOf(followPeople, '2').isFollowing, false);
+  assert.equal(stateOf(followPeople, '2').followsYou, true, 'Bỏ theo dõi không thay đổi chiều ngược lại');
+  assert.equal(stateOf(followPeople, '2').relationship, 'friends', 'Bỏ theo dõi vẫn giữ bạn bè');
+  assert.equal(JSON.parse(values.get(friendKey)).version, 3);
+  const afterUnfollowWrites = writes;
+  await reloadedFriends.unfollowPerson('2');
+  assert.equal(writes, afterUnfollowWrites, 'Bỏ theo dõi lặp không ghi thêm');
+  await reloadedNotifications.markNotificationRead(followNotice.id);
+  assert.equal(stateOf(await reloadedFriends.getFriends(), '2').isFollowing, false, 'Đọc thông báo không làm mất lựa chọn bỏ theo dõi');
+  followPeople = await reloadedFriends.sendFriendRequest('5');
+  assert.equal(stateOf(followPeople, '5').isFollowing, false, 'Chỉ gửi lời mời chưa tự theo dõi');
+  await reloadedFriends.cancelFriendRequest(stateOf(followPeople, '5').relationId);
+  followPeople = await reloadedFriends.acceptFriendRequest('follow-fixture-request');
+  assert.equal(stateOf(followPeople, '3').isFollowing, true);
+  assert.equal(stateOf(followPeople, '3').followsYou, true, 'Chấp nhận kết bạn tạo theo dõi hai chiều');
+  assert.equal(stateOf(followPeople, '2').isFollowing, false, 'Không tự theo dõi lại bạn cũ đã bỏ theo dõi');
+
+  sessions.saveSession(issueSession({ id: '3', name: 'Dũng', email: 'dung@example.com' }));
+  followPeople = await reloadedFriends.getFriends();
+  assert.equal(stateOf(followPeople, '1').isFollowing, true);
+  assert.equal(stateOf(followPeople, '1').followsYou, true);
+  await reloadedFriends.unfollowPerson('1');
+  sessions.saveSession(primarySession);
+  followPeople = await reloadedFriends.getFriends();
+  assert.equal(stateOf(followPeople, '3').followsYou, false);
+  assert.equal(stateOf(followPeople, '3').isFollowing, true);
+  assert.equal(stateOf(followPeople, '3').relationship, 'friends');
+
+  const beforeConcurrentFollows = writes;
+  await Promise.all([reloadedFriends.followPerson('4'), reloadedFriends.followPerson('4')]);
+  assert.equal(writes, beforeConcurrentFollows + 1, 'Theo dõi đồng thời không tạo dữ liệu trùng');
+  followPeople = await reloadedFriends.getFriends();
+  assert.equal(stateOf(followPeople, '4').relationship, 'none', 'Có thể theo dõi khi chưa kết bạn');
+  assert.equal(stateOf(followPeople, '4').isFollowing, true);
+  assert.equal(stateOf(followPeople, '4').followsYou, false);
+  sessions.saveSession(issueSession({ id: '4', name: 'Sơn', email: 'son@example.com' }));
+  assert.equal(stateOf(await reloadedFriends.getFriends(), '1').followsYou, true, 'Người được theo dõi thấy đúng người theo dõi mình');
+  sessions.saveSession(primarySession);
+  await reloadedFriends.removeFriend('3');
+  assert.equal(stateOf(await reloadedFriends.getFriends(), '3').isFollowing, true, 'Hủy kết bạn giữ lựa chọn theo dõi riêng');
+
+  await assert.rejects(reloadedFriends.followPerson('1'), (error) => error.code === 'SELF_FOLLOW');
+  await assert.rejects(reloadedFriends.unfollowPerson('1'), (error) => error.code === 'SELF_FOLLOW');
+  await assert.rejects(reloadedFriends.followPerson('missing'), (error) => error.status === 404);
+  sessions.clearSession();
+  await assert.rejects(reloadedFriends.followPerson('6'), (error) => error.status === 401);
+  await assert.rejects(reloadedFriends.unfollowPerson('4'), (error) => error.status === 401);
+  sessions.saveSession(primarySession);
+  const beforeFollowFailure = values.get(friendKey);
+  reloadedNetwork.configureMockNetwork({ online: false });
+  await assert.rejects(reloadedFriends.followPerson('6'), (error) => error.status === 0);
+  assert.equal(values.get(friendKey), beforeFollowFailure);
+  reloadedNetwork.configureMockNetwork({ online: true, failNext: 500 });
+  await assert.rejects(reloadedFriends.unfollowPerson('4'), (error) => error.status === 500);
+  assert.equal(values.get(friendKey), beforeFollowFailure);
+  const followSetItem = storage.setItem;
+  storage.setItem = () => { throw new Error('Storage full'); };
+  try {
+    await assert.rejects(reloadedFriends.followPerson('6'), (error) => error.code === 'STORAGE_WRITE');
+    await assert.rejects(reloadedFriends.unfollowPerson('4'), (error) => error.code === 'STORAGE_WRITE');
+    await assert.rejects(reloadedFriends.acceptFriendRequest('follow-failure-request'), (error) => error.code === 'STORAGE_WRITE');
+    assert.equal(values.get(friendKey), beforeFollowFailure, 'Kết bạn/theo dõi/thông báo cùng thất bại khi không lưu được');
+  } finally { storage.setItem = followSetItem; }
+
+  modules = new Map();
+  const refreshedFollowApi = load('src/api/friends.ts');
+  load('src/dev/mockTransport.ts').configureMockNetwork({ delayMs: 0 });
+  assert.equal(stateOf(await refreshedFollowApi.getFriends(), '2').isFollowing, false, 'Reload không theo dõi lại người đã bỏ');
+  const emptyFollowState = { ...JSON.parse(beforeFollowFailure), follows: [] };
+  values.set(friendKey, JSON.stringify(emptyFollowState));
+  assert.ok((await refreshedFollowApi.getFriends()).every((person) => !person.isFollowing && !person.followsYou), 'Danh sách theo dõi rỗng đã lưu không bị thay bằng mặc định');
+  await refreshedFollowApi.followPerson('4');
+  await refreshedFollowApi.unfollowPerson('4');
+  assert.equal(JSON.parse(values.get(friendKey)).follows.length, 0);
+  assert.equal(stateOf(await refreshedFollowApi.getFriends(), '2').isFollowing, false);
+  values.set(friendKey, JSON.stringify({ ...emptyFollowState, follows: [{ fromId: '1', toId: '4' }, { fromId: '1', toId: '4' }] }));
+  await assert.rejects(refreshedFollowApi.getFriends(), (error) => error.code === 'STORAGE_READ');
+  values.set(friendKey, followSnapshot);
+  console.log('PASS: theo dõi một chiều, tự theo dõi khi chấp nhận kết bạn, bỏ theo dõi vẫn là bạn, chống trùng, dữ liệu cũ/rỗng/reload, quyền và lưu nguyên tử khi lỗi.');
 
   const posts = load('src/api/posts.ts');
   const comments = load('src/api/comments.ts');
