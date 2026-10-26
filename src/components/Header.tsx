@@ -3,6 +3,7 @@ import { theme } from '../core/theme';
 import UserAvatar from './ui/UserAvatar';
 import { useAuth } from '../providers/AuthProvider';
 import NotificationsLink from './NotificationsLink';
+import MoreMenu from './MoreMenu';
 import Brand from './ui/Brand';
 import Icon from './ui/Icon';
 
@@ -43,9 +44,7 @@ export default function Header({ name, activeSection = 'home', onOpenFriends, on
           {width >= 600 && <Text numberOfLines={1} style={styles.name}>{name}</Text>}
           <UserAvatar userId={user?.id} name={name} size={38} />
         </Pressable>
-        <Pressable onPress={onLogout} accessibilityRole="button" accessibilityLabel="Đăng xuất" style={({ pressed }) => [styles.logout, pressed && styles.pressed]}>
-          <Icon name="logout" size={19} color={theme.colors.muted} />
-        </Pressable>
+        <MoreMenu onLogout={onLogout} compact={width < 600} />
       </View>
     </View>
   );
