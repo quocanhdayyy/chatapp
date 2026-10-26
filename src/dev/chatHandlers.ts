@@ -2,7 +2,9 @@ import { ApiError } from '../core/network/ApiError';
 import { MAX_MESSAGE_LENGTH } from '../core/chat';
 import type { HttpRequest } from '../core/network/contracts';
 import { loadChatMessages, saveChatMessages } from '../storage/chat';
-import type { Conversation, Message } from '../types/chat';
+import type { Conversation, ConversationSummary, Message } from '../types/chat';
+import { loadChatReadCursors, saveChatReadCursors } from '../storage/chatRead';
+import { countUnreadMessages } from '../utils/chatUnread';
 import { initialConversations, initialMessages } from './chatData';
 
 function readMessages(): Message[] {
@@ -37,15 +39,68 @@ function appendMessage(conversationId: string, senderId: string, content: string
   return message;
 }
 
+function summarize(
+  conversationId: string,
+  userId: string,
+  messages: Message[],
+  cursors: ReturnType<typeof loadChatReadCursors>,
+): ConversationSummary {
+  // Storage của mock lưu theo thứ tự nhận, kể cả hai tin cùng createdAt.
+  const thread = messages.filter((item) => item.conversationId === conversationId);
+  const last = thread.at(-1);
+  const cursor = cursors.find((item) => item.userId === userId && item.conversationId === conversationId);
+  return {
+    conversationId,
+    lastMessage: last ? { ...last } : null,
+    lastReadMessageId: cursor?.messageId ?? null,
+    unreadCount: countUnreadMessages(thread, userId, cursor?.messageId ?? null),
+  };
+}
+
 export function handleChatRequest(
   request: HttpRequest,
   userId: string,
-): Conversation[] | Message[] | Message {
+): Conversation[] | ConversationSummary[] | ConversationSummary | Message[] | Message {
   if (request.path === '/conversations') {
     if (request.method !== 'GET') throw new ApiError('Chưa hỗ trợ thao tác này.', 405, 'METHOD_NOT_ALLOWED');
     return initialConversations
       .filter((conversation) => conversation.participantIds.includes(userId))
       .map((conversation): Conversation => ({ ...conversation, participantIds: [...conversation.participantIds] }));
+  }
+
+  if (request.path === '/conversations/summary') {
+    if (request.method !== 'GET') throw new ApiError('Chưa hỗ trợ thao tác này.', 405, 'METHOD_NOT_ALLOWED');
+    const messages = readMessages();
+    const cursors = loadChatReadCursors();
+    return initialConversations.filter((item) => item.participantIds.includes(userId)).map((item) =>
+      summarize(item.id, userId, messages, cursors));
+  }
+
+  const readMatch = request.path.match(/^\/conversations\/([^/]+)\/read$/);
+  if (readMatch) {
+    const id = decodeURIComponent(readMatch[1]);
+    requireConversation(id, userId);
+    if (request.method !== 'POST') throw new ApiError('Chưa hỗ trợ thao tác này.', 405, 'METHOD_NOT_ALLOWED');
+    const body = request.body as { messageId?: unknown } | null;
+    if (!body || typeof body !== 'object' || Array.isArray(body) || typeof body.messageId !== 'string' || !body.messageId.trim()) {
+      throw new ApiError('Mốc đọc không hợp lệ.', 400, 'VALIDATION');
+    }
+    const messages = readMessages();
+    const thread = messages.filter((item) => item.conversationId === id);
+    const target = thread.findIndex((item) => item.id === body.messageId);
+    if (target < 0) throw new ApiError('Không tìm thấy tin nhắn trong cuộc trò chuyện.', 404, 'MESSAGE_NOT_FOUND');
+    const cursors = loadChatReadCursors();
+    const previous = cursors.find((item) => item.userId === userId && item.conversationId === id);
+    const previousIndex = thread.findIndex((item) => item.id === previous?.messageId);
+
+    // Chỉ tiến lên đến tin mà giao diện đã hiển thị. Không nuốt tin tới sau đó.
+    if (target > previousIndex) {
+      const next = cursors.filter((item) => item.userId !== userId || item.conversationId !== id);
+      next.push({ userId, conversationId: id, messageId: body.messageId });
+      saveChatReadCursors(next);
+      return summarize(id, userId, messages, next);
+    }
+    return summarize(id, userId, messages, cursors);
   }
 
   const match = request.path.match(/^\/conversations\/([^/]+)\/messages$/);

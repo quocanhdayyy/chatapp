@@ -1,5 +1,5 @@
 import { apiClient } from '../core/network/apiClient';
-import type { Conversation, Message } from '../types/chat';
+import type { Conversation, ConversationSummary, Message } from '../types/chat';
 
 export function getConversations(): Promise<Conversation[]> {
   return apiClient.get('/conversations');
@@ -20,5 +20,19 @@ export function sendMessage(
   return apiClient.post(
     `/conversations/${encodeURIComponent(conversationId)}/messages`,
     { content },
+  );
+}
+
+export function getConversationSummaries(): Promise<ConversationSummary[]> {
+  return apiClient.get('/conversations/summary');
+}
+
+export function markConversationRead(
+  conversationId: string,
+  messageId: string,
+): Promise<ConversationSummary> {
+  return apiClient.post(
+    `/conversations/${encodeURIComponent(conversationId)}/read`,
+    { messageId },
   );
 }

@@ -4,6 +4,7 @@ import { theme } from '../core/theme';
 import UserAvatar from './ui/UserAvatar';
 import { useAuth } from '../providers/AuthProvider';
 import NotificationsLink from './NotificationsLink';
+import ChatLink from './ChatLink';
 import MoreMenu from './MoreMenu';
 import Brand from './ui/Brand';
 import Icon from './ui/Icon';
@@ -34,16 +35,7 @@ export default function Header({ name, activeSection = 'home', onOpenFriends, on
             <Icon name="users" size={23} color={activeSection === 'friends' ? '#315D73' : theme.colors.muted} />
             <Text style={[styles.navText, activeSection === 'friends' && styles.activeText]}>Bạn bè</Text>
           </Pressable>
-          <Pressable
-            onPress={() => router.navigate('/chat')}
-            accessibilityRole="button"
-            accessibilityLabel="Tin nhắn"
-            accessibilityState={{ selected: activeSection === 'chat' }}
-            style={[styles.nav, activeSection === 'chat' && styles.activeNav]}
-          >
-            <Icon name="comment" size={23} color={activeSection === 'chat' ? '#315D73' : theme.colors.muted} />
-            <Text style={[styles.navText, activeSection === 'chat' && styles.activeText]}>Tin nhắn</Text>
-          </Pressable>
+          <ChatLink navigation active={activeSection === 'chat'} />
           <Pressable
             onPress={() => router.navigate('/work')}
             accessibilityRole="button"
@@ -59,15 +51,7 @@ export default function Header({ name, activeSection = 'home', onOpenFriends, on
       )}
       <View style={[styles.actions, width < 440 && styles.compactActions]}>
         {width < 1100 && (
-          <Pressable
-            onPress={() => router.navigate('/chat')}
-            accessibilityRole="button"
-            accessibilityLabel="Tin nhắn"
-            accessibilityState={{ selected: activeSection === 'chat' }}
-            style={[styles.logout, activeSection === 'chat' && styles.selectedAction]}
-          >
-            <Icon name="comment" size={21} color={activeSection === 'chat' ? theme.colors.primary : theme.colors.muted} />
-          </Pressable>
+          <ChatLink active={activeSection === 'chat'} />
         )}
         {width < 1100 && (
           <Pressable

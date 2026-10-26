@@ -1,4 +1,4 @@
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useIsFocused } from 'expo-router';
 import { useCallback, useEffect, useRef, useState, type ComponentRef } from 'react';
 import {
   ScrollView,
@@ -25,12 +25,19 @@ import { simulateIncomingMessage } from '../dev/chatActivity';
 import type { User } from '../types/auth';
 import type { Conversation, Message } from '../types/chat';
 import { mergeChatMessages } from '../utils/chatMessages';
+import { useChatInbox } from '../providers/ChatInboxProvider';
+import { usePageVisible } from '../hooks/usePageVisible';
 
 type Props = {
   user: User;
 };
 
 export default function ChatScreen({ user }: Props) {
+  const { summaries, error: inboxError, refresh: refreshInbox, markRead } = useChatInbox();
+  const focused = useIsFocused();
+  const visible = usePageVisible();
+  const [readError, setReadError] = useState('');
+  const [readRetry, setReadRetry] = useState(0);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [people, setPeople] = useState<FriendEntry[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -161,10 +168,27 @@ export default function ChatScreen({ user }: Props) {
     };
   }, [selectedId, user.id, messagesReload]);
 
+  const selectedSummary = summaries.find((item) => item.conversationId === selectedId);
+  const readTarget = selectedSummary?.unreadCount &&
+    threads[selectedId ?? '']?.some((item) => item.id === selectedSummary.lastMessage?.id)
+    ? selectedSummary.lastMessage?.id ?? null : null;
+
+  useEffect(() => {
+    if (!focused || !visible || !selectedId || !readTarget || messagesLoading || messagesError || inboxError) return;
+    let active = true;
+    setReadError('');
+    void markRead(selectedId, readTarget).catch((err: unknown) => {
+      if (active) setReadError(err instanceof Error ? err.message : 'Không lưu được mốc đã đọc.');
+    });
+    return () => { active = false; };
+    // readRetry cho phép gửi lại cùng mốc đọc sau lỗi lưu/mạng.
+  }, [focused, visible, selectedId, readTarget, messagesLoading, messagesError, inboxError, markRead, readRetry]);
+
   function selectConversation(id: string) {
     if (id === selectedId) return;
 
     selectedConversation.current = id;
+    setReadError('');
     setMessagesError('');
     setMessagesLoading(true);
     setSelectedId(id);
@@ -273,6 +297,7 @@ export default function ChatScreen({ user }: Props) {
     <View style={[styles.layout, compact && styles.compact]}>
       <View style={[styles.sidebar, compact && styles.compactSidebar]}>
         <Text style={styles.title}>Tin nhắn</Text>
+        {!!inboxError && <ErrorState message={inboxError} onRetry={() => { void refreshInbox(); }} />}
 
         <ScrollView
           style={styles.scroll}
@@ -286,7 +311,8 @@ export default function ChatScreen({ user }: Props) {
               const isSelected = conversation.id === selectedId;
 
               const history = threads[conversation.id];
-              const last = history?.[history.length - 1];
+              const summary = summaries.find((item) => item.conversationId === conversation.id);
+              const last = summary?.lastMessage ?? history?.[history.length - 1];
               const lastMessage = last
                 ? `${last.senderId === user.id ? 'Bạn: ' : ''}${last.content}`
                 : history ? 'Chưa có tin nhắn' : 'Mở cuộc trò chuyện';
@@ -298,6 +324,7 @@ export default function ChatScreen({ user }: Props) {
                   name={partner.name}
                   lastMessage={lastMessage}
                   selected={isSelected}
+                  unreadCount={summary?.unreadCount ?? 0}
                   onPress={() => selectConversation(conversation.id)}
                 />
               );
@@ -386,6 +413,7 @@ export default function ChatScreen({ user }: Props) {
               )}
             </ScrollView>
 
+            {!!readError && <ErrorState message={readError} onRetry={() => setReadRetry((value) => value + 1)} />}
             <ChatComposer
               key={selectedId}
               value={draft}
