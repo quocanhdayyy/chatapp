@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type ComponentRef } from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -7,9 +7,10 @@ import {
   useWindowDimensions,
 } from 'react-native';
 
-import { getConversations, getMessages } from '../api/chat';
+import { getConversations, getMessages, sendMessage } from '../api/chat';
 import { getFriends, type FriendEntry } from '../api/friends';
 import ConversationRow from '../components/ConversationRow';
+import ChatComposer from '../components/ChatComposer';
 import UserAvatar from '../components/ui/UserAvatar';
 import {
   EmptyState,
@@ -19,6 +20,7 @@ import {
 import { theme } from '../core/theme';
 import type { User } from '../types/auth';
 import type { Conversation, Message } from '../types/chat';
+import { mergeChatMessages } from '../utils/chatMessages';
 
 type Props = {
   user: User;
@@ -28,7 +30,10 @@ export default function ChatScreen({ user }: Props) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [people, setPeople] = useState<FriendEntry[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [threads, setThreads] = useState<Record<string, Message[]>>({});
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [sendErrors, setSendErrors] = useState<Record<string, string>>({});
+  const [sendingId, setSendingId] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [messagesLoading, setMessagesLoading] = useState(false);
@@ -38,6 +43,15 @@ export default function ChatScreen({ user }: Props) {
   const [reload, setReload] = useState(0);
   const [messagesReload, setMessagesReload] = useState(0);
   const { width } = useWindowDimensions();
+  const mounted = useRef(false);
+  const selectedConversation = useRef<string | null>(null);
+  const sendInFlight = useRef(false);
+  const messageScroll = useRef<ComponentRef<typeof ScrollView>>(null);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   // Khi mở màn hình: lấy các cuộc trò chuyện và danh bạ.
   useEffect(() => {
@@ -46,8 +60,9 @@ export default function ChatScreen({ user }: Props) {
     async function load() {
       setLoading(true);
       setError('');
+      selectedConversation.current = null;
       setSelectedId(null);
-      setMessages([]);
+      setThreads({});
 
       try {
         const [chats, users] = await Promise.all([
@@ -93,9 +108,14 @@ export default function ChatScreen({ user }: Props) {
       try {
         const data = await getMessages(conversationId);
 
-        if (active) setMessages(data);
+        if (active && selectedConversation.current === conversationId) {
+          setThreads((current) => ({
+            ...current,
+            [conversationId]: mergeChatMessages(current[conversationId] ?? [], data, conversationId),
+          }));
+        }
       } catch (err) {
-        if (active) {
+        if (active && selectedConversation.current === conversationId) {
           setMessagesError(
             err instanceof Error
               ? err.message
@@ -103,7 +123,7 @@ export default function ChatScreen({ user }: Props) {
           );
         }
       } finally {
-        if (active) setMessagesLoading(false);
+        if (active && selectedConversation.current === conversationId) setMessagesLoading(false);
       }
     }
 
@@ -117,10 +137,56 @@ export default function ChatScreen({ user }: Props) {
   function selectConversation(id: string) {
     if (id === selectedId) return;
 
-    setMessages([]);
+    selectedConversation.current = id;
     setMessagesError('');
     setMessagesLoading(true);
     setSelectedId(id);
+  }
+
+  function changeDraft(value: string) {
+    const conversationId = selectedId;
+    if (!conversationId) return;
+    setDrafts((current) => ({ ...current, [conversationId]: value }));
+    setSendErrors((current) => ({ ...current, [conversationId]: '' }));
+  }
+
+  async function handleSend() {
+    const conversationId = selectedId;
+    if (!conversationId || selectedConversation.current !== conversationId ||
+        sendInFlight.current || messagesLoading || messagesError) return;
+
+    const draft = drafts[conversationId] ?? '';
+    const content = draft.trim();
+    if (!content) return;
+
+    // Khóa ngay khi bấm, trước khi React kịp cập nhật nút Gửi.
+    sendInFlight.current = true;
+    setSendingId(conversationId);
+    setSendErrors((current) => ({ ...current, [conversationId]: '' }));
+
+    try {
+      const message = await sendMessage(conversationId, content);
+      if (!mounted.current) return;
+
+      // Lưu kết quả theo đúng cuộc trò chuyện, kể cả khi đã chọn người khác.
+      setThreads((current) => ({
+        ...current,
+        [conversationId]: mergeChatMessages(current[conversationId] ?? [], [message], conversationId),
+      }));
+      setDrafts((current) => current[conversationId] === draft
+        ? { ...current, [conversationId]: '' }
+        : current);
+    } catch (err) {
+      if (mounted.current) {
+        setSendErrors((current) => ({
+          ...current,
+          [conversationId]: err instanceof Error ? err.message : 'Không gửi được tin nhắn. Hãy thử lại.',
+        }));
+      }
+    } finally {
+      sendInFlight.current = false;
+      if (mounted.current) setSendingId(null);
+    }
   }
 
   function otherPerson(conversation: Conversation) {
@@ -138,6 +204,9 @@ export default function ChatScreen({ user }: Props) {
   );
 
   const person = selected ? otherPerson(selected) : null;
+  const messages = selectedId ? threads[selectedId] ?? [] : [];
+  const draft = selectedId ? drafts[selectedId] ?? '' : '';
+  const sendError = selectedId ? sendErrors[selectedId] ?? '' : '';
   const compact = width < 760;
 
   if (loading) {
@@ -169,11 +238,11 @@ export default function ChatScreen({ user }: Props) {
               const partner = otherPerson(conversation);
               const isSelected = conversation.id === selectedId;
 
-              const lastMessage =
-                isSelected && !messagesLoading && !messagesError
-                  ? messages[messages.length - 1]?.content ??
-                    'Chưa có tin nhắn'
-                  : 'Mở cuộc trò chuyện';
+              const history = threads[conversation.id];
+              const last = history?.[history.length - 1];
+              const lastMessage = last
+                ? `${last.senderId === user.id ? 'Bạn: ' : ''}${last.content}`
+                : history ? 'Chưa có tin nhắn' : 'Mở cuộc trò chuyện';
 
               return (
                 <ConversationRow
@@ -211,6 +280,8 @@ export default function ChatScreen({ user }: Props) {
 
             <ScrollView
               key={selectedId}
+              ref={messageScroll}
+              onContentSizeChange={() => messageScroll.current?.scrollToEnd({ animated: false })}
               style={styles.scroll}
               contentContainerStyle={styles.messages}
             >
@@ -248,6 +319,16 @@ export default function ChatScreen({ user }: Props) {
                 })
               )}
             </ScrollView>
+
+            <ChatComposer
+              key={selectedId}
+              value={draft}
+              onChange={changeDraft}
+              onSend={() => { void handleSend(); }}
+              disabled={messagesLoading || !!messagesError || sendingId !== null}
+              sending={sendingId !== null && sendingId === selectedId}
+              error={sendError}
+            />
           </>
         )}
       </View>

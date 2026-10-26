@@ -12,3 +12,13 @@ export function getMessages(
     `/conversations/${encodeURIComponent(conversationId)}/messages`,
   );
 }
+
+export function sendMessage(
+  conversationId: string,
+  content: string,
+): Promise<Message> {
+  return apiClient.post(
+    `/conversations/${encodeURIComponent(conversationId)}/messages`,
+    { content },
+  );
+}
